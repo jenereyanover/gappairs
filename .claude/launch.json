@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "gappairs",
+      "runtimeExecutable": "/Users/jenerey/.nvm/versions/node/v20.20.0/bin/node",
+      "runtimeArgs": ["/Users/jenerey/projects/gappairs/node_modules/.bin/next", "dev", "-p", "3533"],
+      "port": 3533,
+      "autoPort": false
+    }
+  ]
+}
