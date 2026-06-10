@@ -9,7 +9,7 @@ import { useLobby } from "lib/useLobby";
 import { rtdbEnabled } from "lib/firebase";
 import { fetchImageSets, type ImageSet } from "lib/imageSets";
 import { isMuted, playFlip, playMatch, playWrong, setMuted } from "utils/sound";
-import { playerColor } from "utils/players";
+import { playerColor, formatTime } from "utils/players";
 import { ACCENT, ACCENT2, GRAD, RADIUS, SCREEN_BG, PANEL_BG, DIFFS, hexA } from "lib/arcade";
 import PackScroller, { buildPacks } from "components/arcade/PackScroller";
 import GameChat, { type ChatMsg } from "components/arcade/GameChat";
@@ -154,6 +154,20 @@ export default function LobbyPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [lobby, chatOpen]);
+
+  // Local game timer (per-client) for the in-game header; resets when a game starts.
+  const [secs, setSecs] = useState(0);
+  const prevStatusRef = useRef<string | null>(null);
+  useEffect(() => {
+    const st = lobby?.status;
+    if (st === "playing" && prevStatusRef.current !== "playing") setSecs(0);
+    prevStatusRef.current = st ?? null;
+  }, [lobby?.status]);
+  useEffect(() => {
+    if (lobby?.status !== "playing") return;
+    const id = setInterval(() => setSecs((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [lobby?.status]);
   const onSendChat = (e: React.FormEvent) => {
     e.preventDefault();
     const t = chatDraft.trim();
@@ -241,11 +255,11 @@ export default function LobbyPage() {
     onSelectSets(imageSetIds.includes(id) ? imageSetIds.filter((x) => x !== id) : [...imageSetIds, id]);
   };
 
-  // board sizing
-  const board = dimension <= 4 ? 440 : dimension <= 6 ? 560 : 680;
-  const gap = dimension <= 4 ? 11 : dimension <= 6 ? 8 : 6;
+  // board sizing (full-screen in-game view, matching the design's GameBoard)
+  const board = dimension <= 4 ? 460 : dimension <= 6 ? 620 : 760;
+  const gap = dimension <= 4 ? 12 : dimension <= 6 ? 9 : 6;
   const glyphFont =
-    dimension <= 4 ? "clamp(24px, 6vmin, 40px)" : dimension <= 6 ? "clamp(15px, 4vmin, 28px)" : "clamp(10px, 2.8vmin, 20px)";
+    dimension <= 4 ? "clamp(26px, 7vmin, 46px)" : dimension <= 6 ? "clamp(17px, 4.6vmin, 32px)" : "clamp(11px, 3.2vmin, 24px)";
   const tileR = Math.max(6, Math.min(R, dimension > 6 ? 9 : 14));
 
   const slots: (string | null)[] = [];
@@ -263,6 +277,126 @@ export default function LobbyPage() {
           text: m.text,
         }
   );
+
+  // ── Full-screen in-game view (matches the design's GameBoard) ──
+  if (inGame && game) {
+    const turnCol = playerColor(colorIndex(game.turnUid, game.turnOrder || []));
+    return (
+      <div style={{ position: "fixed", inset: 0, zIndex: 90, background: SCREEN_BG, color: "#e8ecf6", display: "flex", flexDirection: "column", overflowY: "auto" }}>
+        {/* header: timer + scoreboard | controls */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, padding: "clamp(14px,2.5vw,22px) clamp(16px,4vw,40px)", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "7px 12px", borderRadius: 999, background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.08)", fontSize: 14 }}>
+              <span>⏱</span>
+              <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{formatTime(secs * 1000)}</span>
+            </div>
+            {(game.turnOrder || []).map((uid) => {
+              const col = playerColor(colorIndex(uid, game.turnOrder || []));
+              const active = game.turnUid === uid && lobby.status === "playing";
+              const nm = memberName(uid);
+              return (
+                <div key={uid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 999, background: active ? hexA(col, 0.16) : "rgba(255,255,255,.04)", border: `1.5px solid ${active ? col : "rgba(255,255,255,.08)"}`, boxShadow: active ? `0 0 20px -6px ${col}` : "none", transition: "all .2s" }}>
+                  <span className="font-display" style={{ width: 22, height: 22, borderRadius: 7, background: col, color: "#0b101d", fontWeight: 800, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {(nm.trim().charAt(0) || "?").toUpperCase()}
+                  </span>
+                  <span style={{ fontWeight: 700, fontSize: 13.5, color: active ? "#fff" : "#cdd4e2", maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nm}</span>
+                  <span className="font-display" style={{ fontWeight: 800, fontSize: 15, color: col }}>{game.scores?.[uid] ?? 0}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button onClick={toggleMute} aria-label={muted ? "Unmute" : "Mute"} aria-pressed={muted} className="gb-ctrl" style={{ ...ctrlBtn, width: 42, padding: 0, fontSize: 17 }}>{muted ? "🔇" : "🔊"}</button>
+            {isLeader && lobby.status === "playing" && (
+              <button onClick={() => restartGame()} className="gb-ctrl font-display" style={{ ...ctrlBtn, background: GRAD, color: "#fff", border: "none", fontWeight: 700, padding: "0 16px" }} title="Deal a new board for everyone">↻ New game</button>
+            )}
+            <button onClick={onLeave} className="gb-ctrl" style={{ ...ctrlBtn, padding: "0 18px" }}>Leave</button>
+          </div>
+        </div>
+
+        {/* turn banner */}
+        {lobby.status === "playing" && (
+          <div style={{ textAlign: "center", padding: "2px 16px 6px", fontSize: 14, color: "#9aa3ba", fontWeight: 600 }}>
+            {isMyTurn ? (
+              <span style={{ color: ACCENT2, fontWeight: 800 }}>Your turn!</span>
+            ) : isSpectator ? (
+              <span>You’re spectating</span>
+            ) : (
+              <>
+                <span style={{ color: turnCol, fontWeight: 800 }}>{memberName(game.turnUid)}</span>
+                {"’s turn"}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* board */}
+        <div style={{ flex: "1 1 auto", display: "flex", alignItems: "center", justifyContent: "center", padding: "clamp(10px,2vw,24px)", minHeight: 0 }}>
+          <div style={{ position: "relative", width: `min(92vw, 86vh, ${board}px)` }}>
+            <div style={{ display: "grid", gridTemplateColumns: `repeat(${dimension}, 1fr)`, gap, fontSize: glyphFont }}>
+              {(game.tiles || []).map((emoji, i) => {
+                const ownerUid = game.matchedBy?.[i];
+                const isPaired = ownerUid !== undefined;
+                const isOpen = (game.open || []).includes(i);
+                const matchColor = isPaired ? playerColor(colorIndex(ownerUid, game.turnOrder || [])) : ACCENT;
+                const disabled = !isMyTurn || lobby.status !== "playing" || game.resolving || isPaired || isOpen;
+                return (
+                  <Card key={i} emoji={emoji} open={isOpen} paired={isPaired} matchColor={matchColor} radius={tileR} disabled={disabled} onClick={() => { if (!disabled) playFlip(); flip(i); }} />
+                );
+              })}
+            </div>
+
+            {lobby.status === "playing" && (
+              <GameChat messages={chatForGame} onSend={(t) => sendChat(t)} open={chatOpen} setOpen={setChatOpen} />
+            )}
+
+            {lobby.status === "paused" && (
+              <BoardOverlay>
+                <div style={{ fontSize: 40 }}>⏸️</div>
+                <h2 className="font-display" style={{ fontSize: 22, fontWeight: 700, margin: "8px 0 4px" }}>Game paused</h2>
+                <p style={{ fontSize: 13.5, color: "#9aa3ba", margin: 0 }}>{lobby.pausedReason || "A player left."}</p>
+                {isLeader ? (
+                  <button onClick={() => restartGame()} className="c-start font-display" style={{ marginTop: 16, background: GRAD, color: "#fff", border: "none", borderRadius: R - 2, padding: "12px 28px", fontWeight: 800, fontSize: 15, cursor: "pointer", boxShadow: `0 0 30px -8px ${hexA(ACCENT, 0.9)}` }}>Restart game</button>
+                ) : (
+                  <p style={{ marginTop: 12, fontSize: 13.5, color: "#9aa3ba" }}>Waiting for <span style={{ fontWeight: 700, color: "#e8ecf6" }}>{memberName(lobby.leader)}</span> to restart…</p>
+                )}
+              </BoardOverlay>
+            )}
+
+            {lobby.status === "finished" && (
+              <BoardOverlay>
+                <div style={{ fontSize: 40 }}>{game.winnerUid === "tie" ? "🤝" : "🏆"}</div>
+                <h2 className="font-display" style={{ fontSize: 22, fontWeight: 700, margin: "8px 0 6px" }}>
+                  {game.winnerUid === "tie" ? "It’s a tie!" : `${memberName(game.winnerUid || "")} wins!`}
+                </h2>
+                <p style={{ color: "#8b94a8", fontSize: 13, margin: "0 0 10px" }}>{formatTime(secs * 1000)}</p>
+                <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "2px 10px", fontSize: 13.5 }}>
+                  {(game.turnOrder || []).map((pid, i) => (
+                    <span key={pid} style={{ fontWeight: 700, color: playerColor(i) }}>{memberName(pid)} {game.scores?.[pid] ?? 0}</span>
+                  ))}
+                </div>
+                {isLeader ? (
+                  <>
+                    <button onClick={() => startGame()} className="c-start font-display" style={{ marginTop: 16, width: "100%", background: GRAD, color: "#fff", border: "none", borderRadius: R - 2, padding: 12, fontWeight: 800, fontSize: 15, cursor: "pointer", boxShadow: `0 0 30px -8px ${hexA(ACCENT, 0.9)}` }}>
+                      Play again ({dimension}×{dimension})
+                    </button>
+                    <p style={{ marginTop: 12, fontSize: 10.5, fontWeight: 800, letterSpacing: ".08em", color: "#6b7488", textTransform: "uppercase" }}>or pick a new size</p>
+                    <div style={{ marginTop: 8, display: "flex", justifyContent: "center", gap: 8 }}>
+                      {DIFFS.map((d) => (
+                        <button key={d.id} onClick={() => startGame(d.n)} className="c-diff" style={{ borderRadius: 9, border: `1.5px solid ${d.n === dimension ? d.color : "rgba(255,255,255,.12)"}`, background: d.n === dimension ? `rgba(${d.tint},.16)` : "rgba(255,255,255,.03)", color: d.n === dimension ? "#fff" : "#cdd4e2", padding: "6px 12px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>{d.grid}</button>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <p style={{ marginTop: 14, fontSize: 13.5, color: "#9aa3ba" }}>Waiting for <span style={{ fontWeight: 700, color: "#e8ecf6" }}>{memberName(lobby.leader)}</span> to start a new game…</p>
+                )}
+              </BoardOverlay>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: SCREEN_BG, color: "#e8ecf6", overflowY: "auto" }}>
@@ -387,115 +521,6 @@ export default function LobbyPage() {
           )}
         </div>
 
-        {/* In-game board */}
-        {inGame && game && (
-          <div style={{ marginTop: 22 }}>
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: 10 }}>
-              {(game.turnOrder || []).map((uid) => {
-                const col = playerColor(colorIndex(uid, game.turnOrder || []));
-                const active = game.turnUid === uid && lobby.status === "playing";
-                return (
-                  <div key={uid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 999, background: active ? hexA(col, 0.16) : "rgba(255,255,255,.04)", border: `1.5px solid ${active ? col : "rgba(255,255,255,.08)"}`, boxShadow: active ? `0 0 20px -6px ${col}` : "none" }}>
-                    <span className="font-display" style={{ width: 22, height: 22, borderRadius: 7, background: col, color: "#0b101d", fontWeight: 800, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      {(memberName(uid).trim().charAt(0) || "?").toUpperCase()}
-                    </span>
-                    <span style={{ fontWeight: 700, fontSize: 13.5, color: active ? "#fff" : "#cdd4e2", maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{memberName(uid)}</span>
-                    <span className="font-display" style={{ fontWeight: 800, fontSize: 15, color: col }}>{game.scores?.[uid] ?? 0}</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            {lobby.status === "playing" && (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginTop: 8, fontSize: 14 }}>
-                {isMyTurn ? (
-                  <span style={{ fontWeight: 800, color: ACCENT2 }}>Your turn!</span>
-                ) : isSpectator ? (
-                  <span style={{ color: "#9aa3ba" }}>Spectating</span>
-                ) : (
-                  <span style={{ color: "#9aa3ba" }}>Turn: <span style={{ fontWeight: 700, color: "#e8ecf6" }}>{memberName(game.turnUid)}</span></span>
-                )}
-                {isLeader && (
-                  <button onClick={() => restartGame()} className="gb-ctrl" style={{ ...ctrlBtn, height: 30, padding: "0 12px", fontSize: 12.5 }} title="Deal a new board for everyone">↻ New game</button>
-                )}
-              </div>
-            )}
-
-            <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
-              <div style={{ position: "relative", width: `min(92vw, ${board}px)` }}>
-                <div style={{ display: "grid", gridTemplateColumns: `repeat(${dimension}, 1fr)`, gap, fontSize: glyphFont }}>
-                  {(game.tiles || []).map((emoji, i) => {
-                    const ownerUid = game.matchedBy?.[i];
-                    const isPaired = ownerUid !== undefined;
-                    const isOpen = (game.open || []).includes(i);
-                    const matchColor = isPaired ? playerColor(colorIndex(ownerUid, game.turnOrder || [])) : ACCENT;
-                    const disabled = !isMyTurn || lobby.status !== "playing" || game.resolving || isPaired || isOpen;
-                    return (
-                      <Card
-                        key={i}
-                        emoji={emoji}
-                        open={isOpen}
-                        paired={isPaired}
-                        matchColor={matchColor}
-                        radius={tileR}
-                        disabled={disabled}
-                        onClick={() => { if (!disabled) playFlip(); flip(i); }}
-                      />
-                    );
-                  })}
-                </div>
-
-                {lobby.status === "playing" && (
-                  <GameChat messages={chatForGame} onSend={(t) => sendChat(t)} open={chatOpen} setOpen={setChatOpen} />
-                )}
-
-                {/* Paused — overlaid on the board so chat stays usable */}
-                {lobby.status === "paused" && (
-                  <BoardOverlay>
-                    <div style={{ fontSize: 40 }}>⏸️</div>
-                    <h2 className="font-display" style={{ fontSize: 22, fontWeight: 700, margin: "8px 0 4px" }}>Game paused</h2>
-                    <p style={{ fontSize: 13.5, color: "#9aa3ba", margin: 0 }}>{lobby.pausedReason || "A player left."}</p>
-                    {isLeader ? (
-                      <button onClick={() => restartGame()} className="c-start font-display" style={{ marginTop: 16, background: GRAD, color: "#fff", border: "none", borderRadius: R - 2, padding: "12px 28px", fontWeight: 800, fontSize: 15, cursor: "pointer", boxShadow: `0 0 30px -8px ${hexA(ACCENT, 0.9)}` }}>Restart game</button>
-                    ) : (
-                      <p style={{ marginTop: 12, fontSize: 13.5, color: "#9aa3ba" }}>Waiting for <span style={{ fontWeight: 700, color: "#e8ecf6" }}>{memberName(lobby.leader)}</span> to restart…</p>
-                    )}
-                  </BoardOverlay>
-                )}
-
-                {/* Finished — leader plays again or picks a new size */}
-                {lobby.status === "finished" && (
-                  <BoardOverlay>
-                    <div style={{ fontSize: 40 }}>{game.winnerUid === "tie" ? "🤝" : "🏆"}</div>
-                    <h2 className="font-display" style={{ fontSize: 22, fontWeight: 700, margin: "8px 0 6px" }}>
-                      {game.winnerUid === "tie" ? "It’s a tie!" : `${memberName(game.winnerUid || "")} wins!`}
-                    </h2>
-                    <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "2px 10px", fontSize: 13.5 }}>
-                      {(game.turnOrder || []).map((pid, i) => (
-                        <span key={pid} style={{ fontWeight: 700, color: playerColor(i) }}>{memberName(pid)} {game.scores?.[pid] ?? 0}</span>
-                      ))}
-                    </div>
-                    {isLeader ? (
-                      <>
-                        <button onClick={() => startGame()} className="c-start font-display" style={{ marginTop: 16, width: "100%", background: GRAD, color: "#fff", border: "none", borderRadius: R - 2, padding: 12, fontWeight: 800, fontSize: 15, cursor: "pointer", boxShadow: `0 0 30px -8px ${hexA(ACCENT, 0.9)}` }}>
-                          Play again ({dimension}×{dimension})
-                        </button>
-                        <p style={{ marginTop: 12, fontSize: 10.5, fontWeight: 800, letterSpacing: ".08em", color: "#6b7488", textTransform: "uppercase" }}>or pick a new size</p>
-                        <div style={{ marginTop: 8, display: "flex", justifyContent: "center", gap: 8 }}>
-                          {DIFFS.map((d) => (
-                            <button key={d.id} onClick={() => startGame(d.n)} className="c-diff" style={{ borderRadius: 9, border: `1.5px solid ${d.n === dimension ? d.color : "rgba(255,255,255,.12)"}`, background: d.n === dimension ? `rgba(${d.tint},.16)` : "rgba(255,255,255,.03)", color: d.n === dimension ? "#fff" : "#cdd4e2", padding: "6px 12px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>{d.grid}</button>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <p style={{ marginTop: 14, fontSize: 13.5, color: "#9aa3ba" }}>Waiting for <span style={{ fontWeight: 700, color: "#e8ecf6" }}>{memberName(lobby.leader)}</span> to start a new game…</p>
-                    )}
-                  </BoardOverlay>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Chat — full panel everywhere except active play (the board overlay handles that). */}
         {lobby.status !== "playing" && (
