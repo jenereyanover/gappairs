@@ -294,7 +294,7 @@ export default function LobbyPage() {
 
         <div className="lobby-grid" style={{ display: "grid", gridTemplateColumns: inGame ? "1fr" : "1.05fr 1fr", gap: 22, marginTop: 18, alignItems: "start" }}>
           {/* PLAYERS */}
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div style={{ ...sectionLabel, display: "flex", justifyContent: "space-between" }}>
               <span>PLAYERS</span>
               <span style={{ color: "#6b7488" }}>{order.length}/{MAX_PLAYERS}</span>
@@ -344,7 +344,7 @@ export default function LobbyPage() {
 
           {/* SETTINGS (waiting room only) */}
           {!inGame && (
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div style={{ ...sectionLabel, display: "flex", justifyContent: "space-between" }}>
                 <span>TILE PACKS</span>
                 <span style={{ color: "#6b7488", fontWeight: 600, letterSpacing: ".04em" }}>{isLeader ? `${selectedPackIds.length} selected` : "set by host"}</span>
