@@ -53,7 +53,7 @@ export default function Home() {
       .catch(() => setSets([]));
   }, []);
 
-  const packList = buildPacks(sets);
+  const packList = buildPacks(sets.filter((s) => s.status === "published"));
   const togglePack = (id: string) =>
     setPacks((p) => (p.includes(id) ? (p.length > 1 ? p.filter((x) => x !== id) : p) : [...p, id]));
   const setName = (i: number, v: string) => setNames((arr) => arr.map((n, j) => (j === i ? v : n)));
@@ -135,10 +135,18 @@ export default function Home() {
             >
               Leaderboard
             </Link>
+            {isAdmin && (
+              <Link
+                href="/admin"
+                className="c-friend"
+                style={{ fontSize: 14, color: "#f5c542", fontWeight: 600, textDecoration: "none" }}
+              >
+                Admin
+              </Link>
+            )}
             <AuthControl
               enabled={enabled}
               loading={loading}
-              isAdmin={isAdmin}
               loggedIn={!!user && !user.isAnonymous}
               photo={user?.photoURL || null}
               nickname={profile?.nickname || null}
@@ -600,7 +608,6 @@ export default function Home() {
 function AuthControl({
   enabled,
   loading,
-  isAdmin,
   loggedIn,
   photo,
   nickname,
@@ -608,7 +615,6 @@ function AuthControl({
 }: {
   enabled: boolean;
   loading: boolean;
-  isAdmin: boolean;
   loggedIn: boolean;
   photo: string | null;
   nickname: string | null;
@@ -623,11 +629,6 @@ function AuthControl({
   if (loggedIn) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        {isAdmin && (
-          <Link href="/admin" className="c-friend" style={{ fontSize: 14, color: "#f5c542", fontWeight: 600, textDecoration: "none" }}>
-            Admin
-          </Link>
-        )}
         <Link
           href="/profile"
           className="c-friend"

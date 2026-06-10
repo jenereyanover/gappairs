@@ -12,6 +12,7 @@ import { isMuted, playFlip, playMatch, playWrong, setMuted } from "utils/sound";
 import { playerColor } from "utils/players";
 import { ACCENT, ACCENT2, GRAD, RADIUS, SCREEN_BG, PANEL_BG, DIFFS, hexA } from "lib/arcade";
 import PackScroller, { buildPacks } from "components/arcade/PackScroller";
+import GameChat, { type ChatMsg } from "components/arcade/GameChat";
 
 const R = RADIUS;
 const sectionLabel: React.CSSProperties = {
@@ -135,6 +136,24 @@ export default function LobbyPage() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: "nearest" });
   }, [chatMessages.length]);
+
+  // In-game chat overlay: Enter opens it (when not typing); resets out of game.
+  const [chatOpen, setChatOpen] = useState(false);
+  useEffect(() => {
+    const ig = !!lobby && lobby.status !== "waiting" && !!lobby.game;
+    if (!ig) {
+      setChatOpen(false);
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" || chatOpen) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+      setChatOpen(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lobby, chatOpen]);
   const onSendChat = (e: React.FormEvent) => {
     e.preventDefault();
     const t = chatDraft.trim();
@@ -232,6 +251,19 @@ export default function LobbyPage() {
   const slots: (string | null)[] = [];
   for (let i = 0; i < MAX_PLAYERS; i++) slots.push(order[i] || null);
 
+  // Normalize chat for the in-game overlay (system logs + colored authors).
+  const chatForGame: ChatMsg[] = chatMessages.map((m) =>
+    m.system
+      ? { id: m.id, kind: "system", text: m.text }
+      : {
+          id: m.id,
+          kind: "chat",
+          author: lobby.members?.[m.uid ?? ""]?.nickname || m.name || "Player",
+          color: order.indexOf(m.uid ?? "") >= 0 ? playerColor(order.indexOf(m.uid ?? "")) : "#9aa3ba",
+          text: m.text,
+        }
+  );
+
   return (
     <div style={{ minHeight: "100vh", background: SCREEN_BG, color: "#e8ecf6", overflowY: "auto" }}>
       <div style={{ maxWidth: 880, margin: "0 auto", padding: "clamp(16px,3vw,28px) clamp(16px,4vw,32px) 48px" }}>
@@ -317,7 +349,7 @@ export default function LobbyPage() {
                 <span>TILE PACKS</span>
                 <span style={{ color: "#6b7488", fontWeight: 600, letterSpacing: ".04em" }}>{isLeader ? `${selectedPackIds.length} selected` : "set by host"}</span>
               </div>
-              <PackScroller packs={buildPacks(sets)} selectedIds={selectedPackIds} onToggle={onTogglePack} readOnly={!isLeader} size="sm" />
+              <PackScroller packs={buildPacks(sets.filter((s) => s.status === "published"))} selectedIds={selectedPackIds} onToggle={onTogglePack} readOnly={!isLeader} size="sm" />
 
               <div style={{ ...sectionLabel, marginTop: 18 }}>DIFFICULTY</div>
               <div style={{ display: "flex", gap: 9 }}>
@@ -413,6 +445,10 @@ export default function LobbyPage() {
                   })}
                 </div>
 
+                {lobby.status === "playing" && (
+                  <GameChat messages={chatForGame} onSend={(t) => sendChat(t)} open={chatOpen} setOpen={setChatOpen} />
+                )}
+
                 {/* Paused — overlaid on the board so chat stays usable */}
                 {lobby.status === "paused" && (
                   <BoardOverlay>
@@ -461,7 +497,8 @@ export default function LobbyPage() {
           </div>
         )}
 
-        {/* Chat */}
+        {/* Chat — full panel everywhere except active play (the board overlay handles that). */}
+        {lobby.status !== "playing" && (
         <div style={{ marginTop: 24 }}>
           <div style={sectionLabel}>CHAT</div>
           <div style={{ borderRadius: R, background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.08)", padding: 12 }}>
@@ -499,6 +536,7 @@ export default function LobbyPage() {
             </form>
           </div>
         </div>
+        )}
       </div>
 
       <style>{`@media (max-width: 680px) { .lobby-grid { grid-template-columns: 1fr !important; } }`}</style>

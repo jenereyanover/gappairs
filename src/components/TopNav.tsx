@@ -9,12 +9,13 @@ export default function TopNav() {
   const pathname = usePathname();
   const { user, profile, loading, enabled, isAdmin, signIn, signOutUser } = useAuth();
 
-  // The menu, leaderboard, game and lobby screens have their own headers/nav.
+  // The menu, leaderboard, admin, game and lobby screens have their own headers/nav.
   if (
     pathname === "/" ||
     pathname?.startsWith("/game") ||
     pathname?.startsWith("/lobby") ||
-    pathname?.startsWith("/leaderboard")
+    pathname?.startsWith("/leaderboard") ||
+    pathname?.startsWith("/admin")
   )
     return null;
 
