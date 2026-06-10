@@ -12,6 +12,7 @@ import { ACCENT, ACCENT2, GRAD, RADIUS, DIFFS, hexA, playerColor } from "lib/arc
 import ArcadeBackground from "components/arcade/ArcadeBackground";
 import { FlipTile, GridDots } from "components/arcade/Tiles";
 import PackScroller, { buildPacks } from "components/arcade/PackScroller";
+import GoogleIcon from "components/GoogleIcon";
 
 const R = RADIUS;
 const acc = ACCENT;
@@ -690,22 +691,7 @@ function AuthControl({
         whiteSpace: "nowrap",
       }}
     >
-      <span
-        style={{
-          width: 16,
-          height: 16,
-          borderRadius: 4,
-          background: "conic-gradient(#ea4335,#fbbc05,#34a853,#4285f4,#ea4335)",
-          color: "#fff",
-          fontSize: 10,
-          fontWeight: 700,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        G
-      </span>
+      <GoogleIcon />
       Log in
     </button>
   );
