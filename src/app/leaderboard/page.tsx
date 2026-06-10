@@ -2,12 +2,42 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import classNames from "classnames";
 import { useAuth } from "context/AuthProvider";
 import { fetchSoloLeaderboard, fetchVsLeaderboard, type SoloScore, type UserProfile } from "lib/games";
 import { formatTime } from "utils/players";
+import { ACCENT, ACCENT2, GRAD, RADIUS, SCREEN_BG, DIFFS, hexA } from "lib/arcade";
 
-const DIMENSIONS = [4, 6, 8, 10, 12];
+const R = RADIUS;
+const MEDALS = ["🥇", "🥈", "🥉"];
+
+function LbRow({ rank, name, you, right }: { rank: number; name: string; you?: boolean; right: string }) {
+  const medalColor = ["#f5c542", "#cfd6e4", "#d08a4e"][rank - 1];
+  return (
+    <div
+      className="lb-row"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "12px 14px",
+        borderRadius: R - 3,
+        background: you ? hexA(ACCENT, 0.12) : "rgba(255,255,255,.025)",
+        border: `1px solid ${you ? hexA(ACCENT, 0.5) : "rgba(255,255,255,.06)"}`,
+      }}
+    >
+      <span style={{ width: 28, flex: "0 0 28px", textAlign: "center", fontSize: rank <= 3 ? 18 : 14, fontWeight: 700, color: rank <= 3 ? medalColor : "#6b7488", fontVariantNumeric: "tabular-nums" }}>
+        {rank <= 3 ? MEDALS[rank - 1] : rank}
+      </span>
+      <span style={{ flex: 1, minWidth: 0, fontWeight: you ? 800 : 600, fontSize: 15, color: you ? ACCENT2 : "#dfe4f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {name}
+        {you && <span style={{ color: "#6b7488", fontWeight: 600, fontSize: 13 }}> · you</span>}
+      </span>
+      <span className="font-display" style={{ fontWeight: 800, fontSize: 16, color: you ? ACCENT2 : "#fff", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+        {right}
+      </span>
+    </div>
+  );
+}
 
 export default function LeaderboardPage() {
   const { user, loading, enabled, signIn } = useAuth();
@@ -32,108 +62,101 @@ export default function LeaderboardPage() {
     };
   }, [enabled, user, dimension]);
 
-  const medal = (i: number) => (i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}`);
+  const card: React.CSSProperties = {
+    background: "rgba(17,24,40,.6)",
+    border: "1px solid rgba(255,255,255,.08)",
+    borderRadius: R + 6,
+    padding: "clamp(18px,2.5vw,26px)",
+  };
+  const cardTitle: React.CSSProperties = { fontSize: 18, fontWeight: 700, margin: 0, whiteSpace: "nowrap" };
+  const activeDiff = DIFFS.find((d) => d.n === dimension) || DIFFS[0];
 
   return (
-    <main className="flex min-h-screen w-full flex-col items-center bg-slate-900 px-4 pb-12 pt-20 text-slate-100">
-      <div className="w-full max-w-2xl">
-        <Link href="/" className="text-sm text-slate-400 hover:text-white">
+    <div style={{ minHeight: "100vh", background: SCREEN_BG, color: "#e8ecf6", overflowY: "auto" }}>
+      <div style={{ maxWidth: 1000, margin: "0 auto", padding: "clamp(20px,4vw,40px) clamp(18px,4vw,40px) 60px" }}>
+        <Link href="/" className="lb-back" style={{ color: "#9aa3ba", fontSize: 15, fontWeight: 600, textDecoration: "none", padding: "4px 0", display: "inline-flex", alignItems: "center", gap: 8 }}>
           ← Back to menu
         </Link>
-        <h1 className="mt-3 text-3xl font-extrabold tracking-tight">🏆 Leaderboard</h1>
+        <h1 className="font-display" style={{ display: "flex", alignItems: "center", gap: 14, fontSize: "clamp(30px,5vw,44px)", fontWeight: 700, letterSpacing: "-.01em", margin: "14px 0 28px" }}>
+          <span>🏆</span> Leaderboard
+        </h1>
 
         {!enabled ? (
-          <p className="mt-6 rounded-lg bg-slate-800 p-4 text-slate-300">
-            Leaderboards need Firebase — add your keys to <code>.env.local</code>.
-          </p>
+          <Panel>Leaderboards need Firebase — add your keys to <code>.env.local</code>.</Panel>
         ) : loading ? (
-          <p className="mt-6 text-slate-400">Loading…</p>
+          <Panel>Loading…</Panel>
         ) : !user || user.isAnonymous ? (
-          <div className="mt-6 rounded-lg bg-slate-800 p-6 text-center">
-            <p className="text-slate-300">Log in to view the leaderboards.</p>
-            <button
-              onClick={signIn}
-              className="mt-4 rounded-md bg-white px-4 py-2 font-medium text-slate-800 hover:bg-slate-100"
-            >
+          <Panel>
+            <p style={{ margin: "0 0 14px", color: "#cdd4e2" }}>Log in to view the leaderboards.</p>
+            <button onClick={signIn} className="c-start font-display" style={{ background: GRAD, color: "#fff", border: "none", borderRadius: R - 2, padding: "12px 22px", fontWeight: 800, fontSize: 14.5, cursor: "pointer", boxShadow: `0 0 30px -8px ${hexA(ACCENT, 0.9)}` }}>
               Log in with Google
             </button>
-          </div>
+          </Panel>
         ) : (
-          <div className="mt-6 grid gap-6 md:grid-cols-2">
-            {/* Fastest solo times */}
-            <section className="rounded-xl bg-slate-800 p-5">
-              <div className="flex items-center justify-between">
-                <h2 className="font-semibold">Fastest solo</h2>
-                <div className="flex gap-1">
-                  {DIMENSIONS.map((d) => (
-                    <button
-                      key={d}
-                      onClick={() => setDimension(d)}
-                      className={classNames(
-                        "rounded px-2 py-1 text-xs font-semibold transition-colors",
-                        d === dimension ? "bg-indigo-500 text-white" : "bg-slate-900 text-slate-400 hover:text-white"
-                      )}
-                    >
-                      {d}×{d}
-                    </button>
-                  ))}
+          <div className="lb-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 22, alignItems: "start" }}>
+            {/* Fastest solo */}
+            <div style={card}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
+                <h2 className="font-display" style={cardTitle}>Fastest solo</h2>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {DIFFS.map((d) => {
+                    const on = d.n === dimension;
+                    return (
+                      <button
+                        key={d.id}
+                        onClick={() => setDimension(d.n)}
+                        className="lb-tab"
+                        style={{ padding: "7px 12px", borderRadius: 9, border: `1.5px solid ${on ? ACCENT : "rgba(255,255,255,.1)"}`, background: on ? GRAD : "rgba(255,255,255,.04)", color: on ? "#fff" : "#9aa3ba", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit", boxShadow: on ? `0 0 20px -6px ${hexA(ACCENT, 0.9)}` : "none", transition: "all .15s" }}
+                      >
+                        {d.grid}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               {loadingBoards ? (
-                <p className="mt-3 text-sm text-slate-500">Loading…</p>
+                <p style={{ fontSize: 13.5, color: "#6b7488" }}>Loading…</p>
               ) : solo.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-500">No times for {dimension}×{dimension} yet.</p>
+                <p style={{ fontSize: 13.5, color: "#6b7488" }}>No times for {activeDiff.grid} yet.</p>
               ) : (
-                <ol className="mt-3 space-y-1">
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {solo.map((s, i) => (
-                    <li
-                      key={s.uid}
-                      className={classNames(
-                        "flex items-center justify-between rounded-md px-2 py-1.5 text-sm",
-                        s.uid === user.uid ? "bg-indigo-500/15 ring-1 ring-indigo-400/40" : ""
-                      )}
-                    >
-                      <span className="flex items-center gap-2">
-                        <span className="w-6 text-center">{medal(i)}</span>
-                        <span className="max-w-[9rem] truncate">{s.nickname}</span>
-                      </span>
-                      <span className="font-semibold tabular-nums">{formatTime(s.bestMs)}</span>
-                    </li>
+                    <LbRow key={s.uid} rank={i + 1} name={s.nickname} you={s.uid === user?.uid} right={formatTime(s.bestMs)} />
                   ))}
-                </ol>
+                </div>
               )}
-            </section>
+              <div style={{ fontSize: 12, color: "#6b7488", marginTop: 14, textAlign: "center" }}>{activeDiff.label} · best completion times</div>
+            </div>
 
             {/* Most VS wins */}
-            <section className="rounded-xl bg-slate-800 p-5">
-              <h2 className="font-semibold">Most VS wins</h2>
+            <div style={card}>
+              <h2 className="font-display" style={{ ...cardTitle, marginBottom: 18 }}>Most VS wins</h2>
               {loadingBoards ? (
-                <p className="mt-3 text-sm text-slate-500">Loading…</p>
+                <p style={{ fontSize: 13.5, color: "#6b7488" }}>Loading…</p>
               ) : vs.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-500">No VS wins recorded yet.</p>
+                <p style={{ fontSize: 13.5, color: "#6b7488" }}>No VS wins recorded yet.</p>
               ) : (
-                <ol className="mt-3 space-y-1">
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {vs.map((u, i) => (
-                    <li
-                      key={u.uid}
-                      className={classNames(
-                        "flex items-center justify-between rounded-md px-2 py-1.5 text-sm",
-                        u.uid === user.uid ? "bg-indigo-500/15 ring-1 ring-indigo-400/40" : ""
-                      )}
-                    >
-                      <span className="flex items-center gap-2">
-                        <span className="w-6 text-center">{medal(i)}</span>
-                        <span className="max-w-[9rem] truncate">{u.nickname}</span>
-                      </span>
-                      <span className="font-semibold tabular-nums">{u.vsWins}</span>
-                    </li>
+                    <LbRow key={u.uid} rank={i + 1} name={u.nickname} you={u.uid === user?.uid} right={`${u.vsWins} ${u.vsWins === 1 ? "win" : "wins"}`} />
                   ))}
-                </ol>
+                </div>
               )}
-            </section>
+              <div style={{ fontSize: 12, color: "#6b7488", marginTop: 14, textAlign: "center" }}>all-time head-to-head victories</div>
+            </div>
           </div>
         )}
       </div>
-    </main>
+
+      <style>{`@media (max-width: 720px) { .lb-grid { grid-template-columns: 1fr !important; } }`}</style>
+    </div>
+  );
+}
+
+function Panel({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ background: "rgba(17,24,40,.6)", border: "1px solid rgba(255,255,255,.08)", borderRadius: RADIUS + 4, padding: 24, textAlign: "center" }}>
+      {children}
+    </div>
   );
 }

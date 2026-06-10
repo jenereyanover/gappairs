@@ -2,43 +2,40 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import classNames from "classnames";
-import { motion } from "framer-motion";
 import Card from "components/Card";
 import { useAppContext } from "context/AppProvider";
 import { useAuth } from "context/AuthProvider";
 import { EMOJI_SET, generateTiles, mixFaces } from "utils/helpers";
 import { saveGameResult } from "lib/games";
 import { isMuted, playFlip, playMatch, playWrong, setMuted } from "utils/sound";
-import { PALETTE, formatTime, playerName } from "utils/players";
+import { formatTime, playerName, playerColor } from "utils/players";
+import { ACCENT, ACCENT2, GRAD, RADIUS, SCREEN_BG, PANEL_BG, diffByN, hexA } from "lib/arcade";
 
-function PlayerChip({
-  index,
-  name,
-  score,
-  active,
-}: {
-  index: number;
-  name: string;
-  score: number;
-  active: boolean;
-}) {
-  const c = PALETTE[index];
-  return (
-    <motion.div
-      animate={{ scale: active ? 1.07 : 1 }}
-      transition={{ type: "spring", stiffness: 400, damping: 22 }}
-      className={classNames(
-        "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ring-2 transition-colors",
-        active ? c.chipActive : "text-slate-400 ring-transparent"
-      )}
-    >
-      <span className={classNames("h-2.5 w-2.5 rounded-full", c.dot)} />
-      <span className="max-w-[8rem] truncate">{name}</span>
-      <span className="tabular-nums">{score}</span>
-    </motion.div>
-  );
-}
+const chip: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "7px 12px",
+  borderRadius: 999,
+  background: "rgba(255,255,255,.05)",
+  border: "1px solid rgba(255,255,255,.08)",
+  fontSize: 14,
+};
+const ctrl: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  height: 42,
+  padding: "0 18px",
+  borderRadius: RADIUS - 4,
+  background: "rgba(255,255,255,.05)",
+  border: "1px solid rgba(255,255,255,.1)",
+  color: "#dfe4f0",
+  fontWeight: 600,
+  fontSize: 14,
+  cursor: "pointer",
+  fontFamily: "inherit",
+  transition: "all .15s",
+};
 
 export default function GamePage() {
   const router = useRouter();
@@ -55,13 +52,14 @@ export default function GamePage() {
   const [moves, setMoves] = useState(0);
   const [locked, setLocked] = useState(false);
   const [muted, setMutedState] = useState(() => isMuted());
-  const [confirmRestart, setConfirmRestart] = useState(false);
-  const [startedAt, setStartedAt] = useState<number | null>(null);
-  const [endedAt, setEndedAt] = useState<number | null>(null);
-  const [, setTick] = useState(0);
+  const [secs, setSecs] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [confirmExit, setConfirmExit] = useState(false);
   const savedRef = useRef(false);
 
   const pairCount = (dimension * dimension) / 2;
+  const meta = diffByN(dimension);
 
   const toggleMute = () => {
     const next = !muted;
@@ -77,9 +75,10 @@ export default function GamePage() {
     setCurrentPlayer(0);
     setMoves(0);
     setLocked(false);
-    setConfirmRestart(false);
-    setStartedAt(null);
-    setEndedAt(null);
+    setSecs(0);
+    setRunning(false);
+    setPaused(false);
+    setConfirmExit(false);
     savedRef.current = false;
     const pool = setImages.length ? mixFaces(setImages, pairCount) : EMOJI_SET;
     setTiles(generateTiles(dimension, pool));
@@ -91,12 +90,10 @@ export default function GamePage() {
   }, [start]);
 
   const handleClick = (x: number, y: number) => {
-    if (locked || paired.includes(tiles[x][y])) return;
+    if (locked || paused || paired.includes(tiles[x][y])) return;
     if (open.length >= 2 || open.some(([ox, oy]) => ox === x && oy === y)) return;
-    if (startedAt === null) setStartedAt(Date.now()); // start the clock on the first flip
+    if (!running) setRunning(true);
     playFlip();
-    // Guard again inside the updater so the 2-tile cap and "already open"
-    // check still hold if two clicks land in one render.
     setOpen((prev) => {
       if (prev.length >= 2) return prev;
       if (prev.some(([ox, oy]) => ox === x && oy === y)) return prev;
@@ -112,7 +109,6 @@ export default function GamePage() {
     const emoji = tiles[ax][ay];
 
     if (emoji === tiles[bx][by]) {
-      // Match: current player scores and keeps the turn.
       playMatch();
       setPaired((prev) => [...prev, emoji]);
       setPairOwner((prev) => ({ ...prev, [emoji]: currentPlayer }));
@@ -123,7 +119,6 @@ export default function GamePage() {
       });
       setOpen([]);
     } else {
-      // Miss: flip back, and in VS mode pass play to the next player.
       playWrong();
       setLocked(true);
       const timer = setTimeout(() => {
@@ -137,19 +132,27 @@ export default function GamePage() {
 
   const gameOver = tiles.length > 0 && paired.length === pairCount;
 
-  // Timer: tick while running, freeze the elapsed time on game over.
+  // Timer: tick each second while running, frozen when paused/won.
   useEffect(() => {
-    if (startedAt === null || endedAt !== null) return;
-    const id = setInterval(() => setTick((t) => t + 1), 250);
+    if (!running || gameOver || paused) return;
+    const id = setInterval(() => setSecs((s) => s + 1), 1000);
     return () => clearInterval(id);
-  }, [startedAt, endedAt]);
+  }, [running, gameOver, paused]);
 
   useEffect(() => {
-    if (gameOver && startedAt !== null && endedAt === null) setEndedAt(Date.now());
-  }, [gameOver, startedAt, endedAt]);
+    if (gameOver) setRunning(false);
+  }, [gameOver]);
 
-  const elapsedMs = startedAt === null ? 0 : (endedAt ?? Date.now()) - startedAt;
-  const elapsed = formatTime(elapsedMs);
+  // Esc toggles the exit confirm (or exits the win screen).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (gameOver) router.push("/");
+      else setConfirmExit((c) => !c);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [gameOver, router]);
 
   const maxScore = scores.length ? Math.max(...scores) : 0;
   const leaders = scores.map((s, i) => (s === maxScore ? i : -1)).filter((i) => i >= 0);
@@ -158,10 +161,10 @@ export default function GamePage() {
 
   // Persist the finished game once, for signed-in players.
   useEffect(() => {
-    if (!gameOver || endedAt === null || savedRef.current) return;
+    if (!gameOver || savedRef.current) return;
     if (!enabled || !user || user.isAnonymous) return;
     savedRef.current = true;
-    const timeMs = endedAt - (startedAt ?? endedAt);
+    const timeMs = secs * 1000;
     const nickname = profile?.nickname || playerName(names, 0);
     const record = multiplayer
       ? {
@@ -169,231 +172,382 @@ export default function GamePage() {
           dimension,
           players,
           timeMs,
-          won: !isTie && winner === 0, // the signed-in player is Player 1
+          won: !isTie && winner === 0,
           winnerName: isTie ? "Tie" : playerName(names, winner),
           scores,
         }
       : { mode: "solo" as const, dimension, players: 1, timeMs, moves, won: true };
     saveGameResult(user.uid, nickname, record).catch((e) => console.error("Failed to save game", e));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameOver, endedAt, enabled, user]);
+  }, [gameOver]);
 
-  const handleRestart = () => {
-    // Only ask for confirmation once the game is actually under way.
-    if (startedAt !== null && !gameOver) setConfirmRestart(true);
-    else start();
-  };
+  // sizing by difficulty
+  const board = dimension <= 4 ? 460 : dimension <= 6 ? 620 : 760;
+  const gap = dimension <= 4 ? 12 : dimension <= 6 ? 9 : 6;
+  const glyphFont =
+    dimension <= 4 ? "clamp(26px, 7vmin, 46px)" : dimension <= 6 ? "clamp(17px, 4.6vmin, 32px)" : "clamp(11px, 3.2vmin, 24px)";
+  const tileR = Math.max(6, Math.min(RADIUS, dimension > 6 ? 9 : 14));
 
-  const boardWidth = `min(94vw, ${dimension >= 10 ? 46 : 34}rem)`;
-  const tileFont = `calc(${boardWidth} / ${dimension} * 0.5)`;
-  const tileGap = `calc(${boardWidth} / ${dimension} * 0.08)`;
+  const ranking = multiplayer
+    ? scores.map((s, i) => ({ i, score: s })).sort((a, b) => b.score - a.score)
+    : [];
 
   return (
-    <main className="flex min-h-screen w-full flex-col items-center bg-slate-900 text-slate-100">
-      <header className="flex w-full max-w-3xl flex-wrap items-center justify-between gap-3 px-4 py-4">
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1 rounded-md bg-slate-800 px-2.5 py-1 text-sm font-semibold tabular-nums">
-            ⏱ {elapsed}
-          </span>
-          {!multiplayer && (
-            <>
-              <span className="text-sm uppercase tracking-wide text-slate-400">
-                {dimension} × {dimension}
-              </span>
-              <span className="text-sm font-semibold">
-                Moves <span className="tabular-nums">{moves}</span>
-              </span>
-              <span className="text-sm font-semibold">
-                Pairs{" "}
-                <span className="tabular-nums">
-                  {paired.length}/{pairCount}
-                </span>
-              </span>
-            </>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <button
-            className="rounded-md bg-slate-700 px-3 py-1.5 text-sm transition-colors hover:bg-slate-600 active:bg-slate-800"
-            onClick={toggleMute}
-            aria-label={muted ? "Unmute sounds" : "Mute sounds"}
-            aria-pressed={muted}
-          >
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 90,
+        background: SCREEN_BG,
+        color: "#e8ecf6",
+        display: "flex",
+        flexDirection: "column",
+        overflowY: "auto",
+      }}
+    >
+      {/* header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 14,
+          padding: "clamp(14px,2.5vw,22px) clamp(16px,4vw,40px)",
+          flexWrap: "wrap",
+        }}
+      >
+        {multiplayer ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ ...chip, gap: 7 }}>
+              <span>⏱</span>
+              <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{formatTime(secs * 1000)}</span>
+            </div>
+            {Array.from({ length: players }).map((_, i) => {
+              const active = i === currentPlayer && !gameOver;
+              const col = playerColor(i);
+              const nm = playerName(names, i);
+              return (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "7px 12px",
+                    borderRadius: 999,
+                    background: active ? hexA(col, 0.16) : "rgba(255,255,255,.04)",
+                    border: `1.5px solid ${active ? col : "rgba(255,255,255,.08)"}`,
+                    boxShadow: active ? `0 0 20px -6px ${col}` : "none",
+                    transition: "all .2s",
+                  }}
+                >
+                  <span
+                    className="font-display"
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 7,
+                      background: col,
+                      color: "#0b101d",
+                      fontWeight: 800,
+                      fontSize: 12,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    {(nm.trim().charAt(0) || "?").toUpperCase()}
+                  </span>
+                  <span
+                    style={{
+                      fontWeight: 700,
+                      fontSize: 13.5,
+                      color: active ? "#fff" : "#cdd4e2",
+                      maxWidth: 90,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {nm}
+                  </span>
+                  <span className="font-display" style={{ fontWeight: 800, fontSize: 15, color: col, fontVariantNumeric: "tabular-nums" }}>
+                    {scores[i]}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+            <div style={{ ...chip, gap: 7 }}>
+              <span>⏱</span>
+              <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700, fontSize: 15 }}>{formatTime(secs * 1000)}</span>
+            </div>
+            <span style={{ fontWeight: 700, fontSize: 15, color: "#9aa3ba" }}>{meta.grid}</span>
+            <span style={{ fontWeight: 700, fontSize: 15 }}>
+              Moves <span style={{ color: ACCENT2 }}>{moves}</span>
+            </span>
+            <span style={{ fontWeight: 700, fontSize: 15 }}>
+              Pairs <span style={{ color: ACCENT2 }}>{paired.length}/{pairCount}</span>
+            </span>
+          </div>
+        )}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={toggleMute} aria-label="Toggle sound" className="gb-ctrl" style={{ ...ctrl, width: 42, padding: 0, fontSize: 17 }}>
             {muted ? "🔇" : "🔊"}
           </button>
-          <button
-            className="rounded-md bg-indigo-500 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-indigo-400 active:bg-indigo-600"
-            onClick={handleRestart}
-          >
+          {!gameOver && (
+            <button onClick={() => setPaused((p) => !p)} className="gb-ctrl" style={ctrl}>
+              {paused ? "▶ Resume" : "❚❚ Pause"}
+            </button>
+          )}
+          <button onClick={start} className="gb-ctrl font-display" style={{ ...ctrl, background: GRAD, color: "#fff", border: "none", fontWeight: 700 }}>
             Restart
           </button>
-          <button
-            className="rounded-md bg-slate-700 px-3 py-1.5 text-sm font-medium transition-colors hover:bg-slate-600 active:bg-slate-800"
-            onClick={() => router.push("/")}
-          >
-            Menu
+          <button onClick={() => setConfirmExit(true)} className="gb-ctrl" style={ctrl}>
+            Exit
           </button>
-        </div>
-      </header>
-
-      {multiplayer && (
-        <div className="flex w-full max-w-3xl flex-col items-center gap-3 px-4 pb-1">
-          <div className="flex flex-wrap justify-center gap-2">
-            {scores.map((s, i) => (
-              <PlayerChip
-                key={i}
-                index={i}
-                name={playerName(names, i)}
-                score={s}
-                active={currentPlayer === i && !gameOver}
-              />
-            ))}
-          </div>
-          {!gameOver && (
-            <motion.div
-              key={currentPlayer}
-              initial={{ scale: 0.85, opacity: 0, y: -4 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              transition={{ type: "spring", stiffness: 380, damping: 20 }}
-              className={classNames(
-                "flex items-center gap-2 rounded-full px-5 py-2 text-base font-bold ring-2",
-                PALETTE[currentPlayer].banner
-              )}
-            >
-              <motion.span
-                className={classNames("h-3 w-3 rounded-full", PALETTE[currentPlayer].dot)}
-                animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
-                transition={{ repeat: Infinity, duration: 1.3 }}
-              />
-              <span className="text-[0.65rem] font-semibold uppercase tracking-widest opacity-70">
-                Turn
-              </span>
-              <span>{playerName(names, currentPlayer)}</span>
-            </motion.div>
-          )}
-        </div>
-      )}
-
-      <div className="flex flex-1 items-center justify-center p-4">
-        <div
-          className={classNames(
-            "rounded-2xl p-2 ring-2 transition-colors duration-300",
-            multiplayer && !gameOver ? PALETTE[currentPlayer].ring : "ring-transparent"
-          )}
-        >
-          <div
-            style={{
-              width: boardWidth,
-              fontSize: tileFont,
-              gap: tileGap,
-              display: "grid",
-              gridTemplateColumns: `repeat(${dimension}, minmax(0, 1fr))`,
-            }}
-          >
-            {tiles.map((row, x) =>
-              row.map((emoji, y) => {
-                const isPaired = paired.includes(emoji);
-                const isOpen = open.some(([ox, oy]) => ox === x && oy === y);
-                const owner = pairOwner[emoji];
-                const matchClass =
-                  multiplayer && owner !== undefined ? PALETTE[owner].match : undefined;
-                return (
-                  <Card
-                    key={`${x}-${y}`}
-                    emoji={emoji}
-                    open={isOpen}
-                    paired={isPaired}
-                    matchClass={matchClass}
-                    disabled={locked || isOpen || isPaired}
-                    onClick={() => handleClick(x, y)}
-                  />
-                );
-              })
-            )}
-          </div>
         </div>
       </div>
 
+      {/* turn banner (vs) */}
+      {multiplayer && !gameOver && (
+        <div style={{ textAlign: "center", padding: "2px 16px 6px", fontSize: 14, color: "#9aa3ba", fontWeight: 600 }}>
+          <span style={{ color: playerColor(currentPlayer), fontWeight: 800 }}>{playerName(names, currentPlayer)}</span>
+          {"’s turn"}
+        </div>
+      )}
+
+      {/* board */}
+      <div style={{ flex: "1 1 auto", display: "flex", alignItems: "center", justifyContent: "center", padding: "clamp(10px,2vw,24px)", minHeight: 0 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${dimension}, 1fr)`,
+            gap,
+            width: `min(92vw, 86vh, ${board}px)`,
+            fontSize: glyphFont,
+          }}
+        >
+          {tiles.map((row, x) =>
+            row.map((emoji, y) => {
+              const isPaired = paired.includes(emoji);
+              const isOpen = open.some(([ox, oy]) => ox === x && oy === y);
+              const owner = pairOwner[emoji];
+              const matchColor = multiplayer && owner !== undefined ? playerColor(owner) : ACCENT;
+              return (
+                <Card
+                  key={`${x}-${y}`}
+                  emoji={emoji}
+                  open={isOpen}
+                  paired={isPaired}
+                  matchColor={matchColor}
+                  radius={tileR}
+                  disabled={locked || paused || isOpen || isPaired}
+                  onClick={() => handleClick(x, y)}
+                />
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* win overlay */}
       {gameOver && (
-        <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-sm rounded-2xl bg-slate-800 p-8 text-center shadow-xl">
-            <p className="text-5xl">{!multiplayer ? "🎉" : isTie ? "🤝" : "🏆"}</p>
-            <h2 className="mt-3 text-2xl font-bold">
-              {!multiplayer ? (
-                "You win!"
-              ) : isTie ? (
-                "It's a tie!"
-              ) : (
-                <span className={PALETTE[winner].text}>{playerName(names, winner)} wins!</span>
-              )}
-            </h2>
-            {!multiplayer ? (
-              <p className="mt-1 text-slate-300">
-                Cleared the {dimension} × {dimension} board in{" "}
-                <span className="font-semibold">{moves}</span> moves.
-              </p>
+        <div
+          className="c-modal-backdrop"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 95,
+            background: "rgba(5,8,16,.74)",
+            backdropFilter: "blur(6px)",
+            WebkitBackdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <div
+            className="c-modal-card"
+            style={{
+              width: "min(440px, 100%)",
+              background: PANEL_BG,
+              border: "1px solid rgba(255,255,255,.1)",
+              borderRadius: RADIUS + 6,
+              padding: "clamp(24px,4vw,34px)",
+              textAlign: "center",
+              boxShadow: `0 40px 90px -30px rgba(0,0,0,.8), 0 0 60px -20px ${hexA(ACCENT2, 0.5)}`,
+            }}
+          >
+            <div style={{ fontSize: 42, marginBottom: 8 }}>🎉</div>
+            {multiplayer ? (
+              <>
+                <h2 className="font-display" style={{ fontSize: 26, fontWeight: 700, margin: "0 0 4px" }}>
+                  {isTie ? "It’s a tie!" : `${playerName(names, winner)} wins!`}
+                </h2>
+                <p style={{ color: "#8b94a8", fontSize: 13.5, margin: "0 0 18px" }}>
+                  {formatTime(secs * 1000)} · {moves} moves
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 22, textAlign: "left" }}>
+                  {ranking.map((r, idx) => {
+                    const col = playerColor(r.i);
+                    const top = r.score === maxScore;
+                    return (
+                      <div
+                        key={r.i}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 11,
+                          padding: "9px 12px",
+                          borderRadius: RADIUS - 4,
+                          background: top ? hexA(col, 0.14) : "rgba(255,255,255,.03)",
+                          border: `1px solid ${top ? hexA(col, 0.5) : "rgba(255,255,255,.07)"}`,
+                        }}
+                      >
+                        <span style={{ width: 20, color: idx === 0 ? "#f5c542" : "#6b7488", fontWeight: 800, fontSize: 13 }}>#{idx + 1}</span>
+                        <span
+                          className="font-display"
+                          style={{
+                            width: 26,
+                            height: 26,
+                            borderRadius: 8,
+                            background: col,
+                            color: "#0b101d",
+                            fontWeight: 800,
+                            fontSize: 13,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          {(playerName(names, r.i).trim().charAt(0) || "?").toUpperCase()}
+                        </span>
+                        <span style={{ flex: 1, fontWeight: 700, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {playerName(names, r.i)}
+                        </span>
+                        <span className="font-display" style={{ fontWeight: 800, fontSize: 17, color: col }}>{r.score}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
             ) : (
-              <div className="mt-3 flex flex-wrap justify-center gap-x-3 gap-y-1 text-slate-300">
-                {scores.map((s, i) => (
-                  <span key={i} className={classNames("font-semibold", PALETTE[i].text)}>
-                    {playerName(names, i)} {s}
-                  </span>
-                ))}
-              </div>
+              <>
+                <h2 className="font-display" style={{ fontSize: 28, fontWeight: 700, margin: "0 0 6px" }}>Solved!</h2>
+                <div style={{ display: "flex", justifyContent: "center", gap: 26, margin: "14px 0 24px" }}>
+                  <div>
+                    <div className="font-display" style={{ fontSize: 30, fontWeight: 800, color: ACCENT2 }}>{formatTime(secs * 1000)}</div>
+                    <div style={{ fontSize: 12, color: "#8b94a8", textTransform: "uppercase", letterSpacing: ".1em" }}>Time</div>
+                  </div>
+                  <div>
+                    <div className="font-display" style={{ fontSize: 30, fontWeight: 800, color: ACCENT2 }}>{moves}</div>
+                    <div style={{ fontSize: 12, color: "#8b94a8", textTransform: "uppercase", letterSpacing: ".1em" }}>Moves</div>
+                  </div>
+                </div>
+              </>
             )}
-            <p className="mt-3 text-sm text-slate-400">
-              ⏱ Finished in{" "}
-              <span className="font-semibold tabular-nums text-slate-200">{elapsed}</span>
-            </p>
-            <div className="mt-6 flex justify-center gap-3">
+            <div style={{ display: "flex", gap: 10 }}>
               <button
-                className="rounded-md bg-indigo-500 px-4 py-2 font-medium transition-colors hover:bg-indigo-400"
-                onClick={start}
-              >
-                Play again
-              </button>
-              <button
-                className="rounded-md bg-slate-700 px-4 py-2 font-medium transition-colors hover:bg-slate-600"
                 onClick={() => router.push("/")}
+                className="c-friend"
+                style={{ flex: 1, background: "rgba(255,255,255,.06)", color: "#dfe4f0", border: "1px solid rgba(255,255,255,.1)", borderRadius: RADIUS - 4, padding: 14, fontWeight: 700, fontSize: 14.5, cursor: "pointer", fontFamily: "inherit" }}
               >
                 Menu
+              </button>
+              <button
+                onClick={start}
+                className="c-start font-display"
+                style={{ flex: 1, background: GRAD, color: "#fff", border: "none", borderRadius: RADIUS - 4, padding: 14, fontWeight: 800, fontSize: 14.5, cursor: "pointer", boxShadow: `0 0 30px -8px ${hexA(ACCENT, 0.9)}` }}
+              >
+                Play again
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {confirmRestart && (
+      {/* pause overlay */}
+      {paused && !gameOver && (
         <div
-          className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 p-4"
-          onClick={() => setConfirmRestart(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 96,
+            background: "rgba(7,11,21,.82)",
+            backdropFilter: "blur(14px)",
+            WebkitBackdropFilter: "blur(14px)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 22,
+            textAlign: "center",
+          }}
+        >
+          <div style={{ fontSize: 52 }}>⏸</div>
+          <div>
+            <h2 className="font-display" style={{ fontSize: 32, fontWeight: 700, margin: 0, letterSpacing: ".02em" }}>Paused</h2>
+            <p style={{ fontSize: 14, color: "#9aa3ba", margin: "6px 0 0" }}>The board is hidden while paused.</p>
+          </div>
+          <button
+            onClick={() => setPaused(false)}
+            className="c-start font-display"
+            style={{ background: GRAD, color: "#fff", border: "none", borderRadius: RADIUS, padding: "15px 40px", fontWeight: 800, fontSize: 17, letterSpacing: ".04em", cursor: "pointer", boxShadow: `0 0 34px -8px ${hexA(ACCENT, 0.9)}` }}
+          >
+            ▶ Resume
+          </button>
+        </div>
+      )}
+
+      {/* exit confirmation */}
+      {confirmExit && !gameOver && (
+        <div
+          className="c-modal-backdrop"
+          onClick={(e) => e.target === e.currentTarget && setConfirmExit(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 115,
+            background: "rgba(5,8,16,.74)",
+            backdropFilter: "blur(6px)",
+            WebkitBackdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
         >
           <div
-            className="w-full max-w-sm rounded-2xl bg-slate-800 p-6 text-center shadow-xl"
-            onClick={(e) => e.stopPropagation()}
+            className="c-modal-card"
+            style={{ width: "min(380px, 100%)", background: PANEL_BG, border: "1px solid rgba(255,255,255,.1)", borderRadius: RADIUS + 6, padding: "clamp(22px,4vw,28px)", textAlign: "center", boxShadow: "0 40px 90px -30px rgba(0,0,0,.8)" }}
           >
-            <h2 className="text-xl font-bold">Restart game?</h2>
-            <p className="mt-2 text-slate-300">Your current progress will be lost.</p>
-            <div className="mt-6 flex justify-center gap-3">
+            <div style={{ fontSize: 32, marginBottom: 6 }}>🚪</div>
+            <h2 className="font-display" style={{ fontSize: 21, fontWeight: 700, margin: "0 0 6px" }}>Quit this game?</h2>
+            <p style={{ fontSize: 13.5, color: "#8b94a8", margin: "0 0 22px", lineHeight: 1.5 }}>Your current progress will be lost.</p>
+            <div style={{ display: "flex", gap: 10 }}>
               <button
-                className="rounded-md bg-slate-700 px-4 py-2 font-medium transition-colors hover:bg-slate-600"
-                onClick={() => setConfirmRestart(false)}
+                onClick={() => setConfirmExit(false)}
+                className="c-friend"
+                style={{ flex: 1, background: "rgba(255,255,255,.06)", color: "#dfe4f0", border: "1px solid rgba(255,255,255,.1)", borderRadius: RADIUS - 4, padding: 13, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}
               >
-                Cancel
+                Keep playing
               </button>
               <button
-                className="rounded-md bg-rose-500 px-4 py-2 font-medium transition-colors hover:bg-rose-400"
-                onClick={() => {
-                  setConfirmRestart(false);
-                  start();
-                }}
+                onClick={() => router.push("/")}
+                className="gb-ctrl"
+                style={{ flex: 1, background: "rgba(244,63,94,.16)", color: "#ff7a8f", border: "1px solid rgba(244,63,94,.4)", borderRadius: RADIUS - 4, padding: 13, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}
               >
-                Restart
+                Exit
               </button>
             </div>
           </div>
         </div>
       )}
-    </main>
+    </div>
   );
 }

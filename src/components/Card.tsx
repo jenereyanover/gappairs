@@ -1,79 +1,79 @@
 "use client";
 
-import { motion } from "framer-motion";
-import classNames from "classnames";
 import { cldThumb, isImageFace } from "lib/cloudinary";
+import { ACCENT, ACCENT2, GRAD, hexA } from "lib/arcade";
 
 interface CardProps {
   emoji: string;
   open?: boolean;
   paired?: boolean;
   disabled?: boolean;
-  /** Classes for the matched (face-up & paired) tile — set per owning player. */
-  matchClass?: string;
+  /** Hex color for a matched tile's ring/glow — the scorer's color (VS) or the accent (solo). */
+  matchColor?: string;
+  /** Tile corner radius in px. */
+  radius?: number;
   onClick: () => void;
 }
 
-const DEFAULT_MATCH = "border-emerald-400 bg-emerald-50";
-
-const faceStyle: React.CSSProperties = {
-  backfaceVisibility: "hidden",
-  WebkitBackfaceVisibility: "hidden",
-};
-
-export default function Card({
-  emoji,
-  open,
-  paired,
-  disabled,
-  matchClass,
-  onClick,
-}: CardProps) {
-  const faceUp = Boolean(open || paired);
+// A reveal-with-pop tile (no 3D flip) — robust across engines, matching the
+// Arcade design's final game board. Face-down = neon "?" back; face-up = light
+// face with the glyph/image, ringed in the scorer's color when matched.
+export default function Card({ emoji, open, paired, disabled, matchColor, radius = 14, onClick }: CardProps) {
+  const up = Boolean(open || paired);
+  const mc = matchColor || ACCENT;
 
   return (
-    <div className="aspect-square w-full" style={{ perspective: 700 }}>
-      <motion.button
-        type="button"
-        aria-label={faceUp ? `tile ${emoji}` : "hidden tile"}
-        disabled={disabled}
-        onClick={onClick}
-        className="relative h-full w-full rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
-        style={{ transformStyle: "preserve-3d", WebkitTransformStyle: "preserve-3d" }}
-        animate={{ rotateY: faceUp ? 180 : 0 }}
-        transition={{ duration: 0.3, ease: "easeInOut" }}
-        whileTap={disabled ? undefined : { scale: 0.92 }}
-      >
-        {/* Face down */}
-        <span
-          className="absolute inset-0 flex items-center justify-center rounded-xl border-2 border-white/30 bg-gradient-to-br from-indigo-500 to-purple-600 text-white/70"
-          style={faceStyle}
-        >
-          <span style={{ fontSize: "0.45em" }}>?</span>
-        </span>
-
-        {/* Face up */}
-        <span
-          className={classNames(
-            "absolute inset-0 flex select-none items-center justify-center rounded-xl border-2 transition-colors",
-            paired ? matchClass ?? DEFAULT_MATCH : "border-slate-200 bg-white"
-          )}
-          style={{ ...faceStyle, transform: "rotateY(180deg)" }}
-        >
-          {isImageFace(emoji) ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={cldThumb(emoji)}
-              alt=""
-              draggable={false}
-              className="h-[78%] w-[78%] rounded-md object-cover"
-              style={{ opacity: paired ? 0.85 : 1 }}
-            />
-          ) : (
-            <span style={{ opacity: paired ? 0.85 : 1 }}>{emoji}</span>
-          )}
-        </span>
-      </motion.button>
-    </div>
+    <button
+      type="button"
+      aria-label={up ? `tile ${emoji}` : "hidden tile"}
+      disabled={disabled}
+      onClick={onClick}
+      className="gb-tile outline-none focus-visible:ring-2 focus-visible:ring-[#7c83ff]"
+      style={{ aspectRatio: "1", border: "none", background: "transparent", padding: 0, width: "100%", borderRadius: radius, cursor: disabled ? "default" : "pointer" }}
+    >
+      <div style={{ position: "relative", width: "100%", height: "100%", animation: up ? "gb-pop .26s ease" : "none" }}>
+        {up ? (
+          <div
+            className="flex select-none items-center justify-center"
+            style={{
+              position: "absolute",
+              inset: 0,
+              borderRadius: radius,
+              background: paired ? hexA(mc, 0.14) : "linear-gradient(160deg,#f3f5fb,#e6e9f4)",
+              boxShadow: paired ? `inset 0 0 0 2px ${mc}, 0 0 22px -6px ${mc}` : "inset 0 0 0 1px rgba(255,255,255,.5)",
+              color: "#1a1f2e",
+              transition: "box-shadow .2s",
+            }}
+          >
+            {isImageFace(emoji) ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={cldThumb(emoji)}
+                alt=""
+                draggable={false}
+                className="h-[80%] w-[80%] rounded-md object-cover"
+                style={{ opacity: paired ? 0.9 : 1 }}
+              />
+            ) : (
+              <span style={{ opacity: paired ? 0.92 : 1 }}>{emoji}</span>
+            )}
+          </div>
+        ) : (
+          <div
+            className="font-display flex items-center justify-center font-extrabold"
+            style={{
+              position: "absolute",
+              inset: 0,
+              borderRadius: radius,
+              background: GRAD,
+              color: "rgba(255,255,255,.92)",
+              boxShadow: `inset 0 0 0 1px rgba(255,255,255,.16), inset 0 -3px 8px ${hexA(ACCENT2, 0.4)}`,
+            }}
+          >
+            <span style={{ fontSize: "0.5em" }}>?</span>
+          </div>
+        )}
+      </div>
+    </button>
   );
 }

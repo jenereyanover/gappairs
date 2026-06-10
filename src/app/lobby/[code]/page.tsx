@@ -2,18 +2,26 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import classNames from "classnames";
 import Card from "components/Card";
 import { useAuth } from "context/AuthProvider";
 import { MAX_PLAYERS, membersByAge, type ChatMessage } from "lib/lobby";
 import { useLobby } from "lib/useLobby";
 import { rtdbEnabled } from "lib/firebase";
 import { fetchImageSets, type ImageSet } from "lib/imageSets";
-import TileSetPicker from "components/TileSetPicker";
-import { PALETTE } from "utils/players";
 import { isMuted, playFlip, playMatch, playWrong, setMuted } from "utils/sound";
+import { playerColor } from "utils/players";
+import { ACCENT, ACCENT2, GRAD, RADIUS, SCREEN_BG, PANEL_BG, DIFFS, hexA } from "lib/arcade";
+import PackScroller, { buildPacks } from "components/arcade/PackScroller";
 
-const SIZES = [4, 6, 8, 10, 12];
+const R = RADIUS;
+const sectionLabel: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 800,
+  letterSpacing: ".16em",
+  color: "#7a83a0",
+  marginBottom: 12,
+  whiteSpace: "nowrap",
+};
 
 export default function LobbyPage() {
   const params = useParams();
@@ -53,7 +61,7 @@ export default function LobbyPage() {
     leave,
   } = useLobby(code, user?.uid, myNick);
 
-  // Selectable image sets (leader picks one to mix with emojis).
+  // Selectable image sets (leader picks one or more to mix with emojis).
   const [sets, setSets] = useState<ImageSet[]>([]);
   useEffect(() => {
     fetchImageSets()
@@ -144,25 +152,20 @@ export default function LobbyPage() {
   if (!rtdbEnabled) {
     return (
       <Shell>
-        <p className="rounded-lg bg-slate-800 p-4 text-slate-300">
-          Online play needs the Realtime Database — add <code>NEXT_PUBLIC_FIREBASE_DATABASE_URL</code> to{" "}
-          <code>.env.local</code>.
-        </p>
+        <Notice text="Online play needs the Realtime Database — add NEXT_PUBLIC_FIREBASE_DATABASE_URL to .env.local." />
       </Shell>
     );
   }
-  if (loading) return <Shell>{<p className="text-slate-400">Loading…</p>}</Shell>;
+  if (loading) return <Shell><Joining /></Shell>;
   if (!user) {
     return (
       <Shell>
         {guestError ? (
           <Notice text={guestError}>
-            <button onClick={signIn} className="mt-4 rounded-md bg-white px-4 py-2 font-medium text-slate-800 hover:bg-slate-100">
-              Log in with Google
-            </button>
+            <button onClick={signIn} style={loginBtn}>Log in with Google</button>
           </Notice>
         ) : (
-          <p className="text-slate-400">Joining…</p>
+          <Joining />
         )}
       </Shell>
     );
@@ -194,7 +197,7 @@ export default function LobbyPage() {
       </Shell>
     );
   }
-  if (!lobby) return <Shell>{<p className="text-slate-400">Joining…</p>}</Shell>;
+  if (!lobby) return <Shell><Joining /></Shell>;
 
   const order = membersByAge(lobby.members);
   const game = lobby.game;
@@ -202,382 +205,361 @@ export default function LobbyPage() {
   const inGame = lobby.status !== "waiting" && !!game;
   const colorIndex = (uid: string, arr: string[]) => {
     const i = arr.indexOf(uid);
-    return (i < 0 ? 0 : i) % PALETTE.length;
+    return i < 0 ? 0 : i;
   };
   const memberName = (uid: string) => lobby.members?.[uid]?.nickname || "Player";
   const isPlayer = (uid: string) => !inGame || (game?.turnOrder || []).includes(uid);
 
-  const boardWidth = `min(94vw, ${dimension >= 10 ? 46 : 34}rem)`;
-  const tileFont = `calc(${boardWidth} / ${dimension} * 0.5)`;
-  const tileGap = `calc(${boardWidth} / ${dimension} * 0.08)`;
+  // pack selection (image sets) — "emojis" shown selected when no sets chosen
+  const imageSetIds = lobby.settings?.imageSetIds ?? [];
+  const selectedPackIds = imageSetIds.length ? imageSetIds : ["emojis"];
+  const onTogglePack = (id: string) => {
+    if (!isLeader) return;
+    if (id === "emojis") {
+      if (imageSetIds.length) onSelectSets([]);
+      return;
+    }
+    onSelectSets(imageSetIds.includes(id) ? imageSetIds.filter((x) => x !== id) : [...imageSetIds, id]);
+  };
+
+  // board sizing
+  const board = dimension <= 4 ? 440 : dimension <= 6 ? 560 : 680;
+  const gap = dimension <= 4 ? 11 : dimension <= 6 ? 8 : 6;
+  const glyphFont =
+    dimension <= 4 ? "clamp(24px, 6vmin, 40px)" : dimension <= 6 ? "clamp(15px, 4vmin, 28px)" : "clamp(10px, 2.8vmin, 20px)";
+  const tileR = Math.max(6, Math.min(R, dimension > 6 ? 9 : 14));
+
+  const slots: (string | null)[] = [];
+  for (let i = 0; i < MAX_PLAYERS; i++) slots.push(order[i] || null);
 
   return (
-    <main className="flex min-h-screen w-full flex-col items-center bg-slate-900 px-4 pb-12 pt-6 text-slate-100">
-      {/* Top bar */}
-      <header className="flex w-full max-w-3xl flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-slate-400">Lobby</span>
-          <span className="rounded-md bg-slate-800 px-2.5 py-1 font-mono text-lg font-bold tracking-widest">{code}</span>
-          <button onClick={copyInvite} className="rounded-md bg-slate-700 px-2.5 py-1 text-sm hover:bg-slate-600">
-            {copied ? "Copied!" : "Invite"}
-          </button>
+    <div style={{ minHeight: "100vh", background: SCREEN_BG, color: "#e8ecf6", overflowY: "auto" }}>
+      <div style={{ maxWidth: 880, margin: "0 auto", padding: "clamp(16px,3vw,28px) clamp(16px,4vw,32px) 48px" }}>
+        {/* top bar */}
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, background: hexA(ACCENT2, 0.08), border: `1px solid ${hexA(ACCENT2, 0.3)}`, borderRadius: R, padding: "10px 14px" }}>
+            <div>
+              <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".14em", color: "#8b94a8", marginBottom: 3 }}>LOBBY CODE</div>
+              <div className="font-display" style={{ fontSize: 24, fontWeight: 700, letterSpacing: ".12em", color: "#fff", lineHeight: 1 }}>{code}</div>
+            </div>
+            <button onClick={copyInvite} className="c-friend" style={{ background: copied ? hexA(ACCENT2, 0.25) : "rgba(255,255,255,.06)", color: copied ? "#fff" : "#dfe4f0", border: `1px solid ${hexA(ACCENT2, 0.4)}`, borderRadius: R - 4, padding: "9px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+              {copied ? "✓ Copied" : "Invite"}
+            </button>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <button onClick={toggleMute} aria-label={muted ? "Unmute" : "Mute"} aria-pressed={muted} className="gb-ctrl" style={{ ...ctrlBtn, width: 40, padding: 0 }}>
+              {muted ? "🔇" : "🔊"}
+            </button>
+            <button onClick={onLeave} className="c-friend" style={{ ...ctrlBtn, padding: "0 18px" }}>Leave</button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={toggleMute}
-            aria-label={muted ? "Unmute sounds" : "Mute sounds"}
-            aria-pressed={muted}
-            className="rounded-md bg-slate-700 px-2.5 py-1.5 text-sm hover:bg-slate-600"
-          >
-            {muted ? "🔇" : "🔊"}
-          </button>
-          <button onClick={onLeave} className="rounded-md bg-slate-700 px-3 py-1.5 text-sm hover:bg-slate-600">
-            Leave
-          </button>
-        </div>
-      </header>
 
-      {/* Players */}
-      <section className="mt-5 w-full max-w-3xl">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-          Players ({order.length}/{MAX_PLAYERS})
-        </h2>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {order.map((uid, i) => {
-            const pal = PALETTE[i % PALETTE.length];
-            const isMe = uid === user.uid;
-            const spectating = inGame && !isPlayer(uid);
-            return (
-              <div
-                key={uid}
-                className={classNames(
-                  "flex items-center gap-2 rounded-full px-3 py-1.5 text-sm ring-1",
-                  isMe ? "bg-slate-800 ring-indigo-400/60" : "bg-slate-800 ring-transparent"
-                )}
-              >
-                <span className={classNames("h-2.5 w-2.5 rounded-full", pal.dot)} />
-                {lobby.leader === uid && <span title="Lobby leader">👑</span>}
-                {isMe ? (
-                  <input
-                    value={nickDraft}
-                    onChange={(e) => {
-                      setNickDraft(e.target.value);
-                      setNickname(e.target.value);
-                    }}
-                    maxLength={16}
-                    className="w-28 bg-transparent font-semibold text-slate-100 focus:outline-none"
-                  />
-                ) : (
-                  <span className="font-semibold">{memberName(uid)}</span>
-                )}
-                {isMe && <span className="text-xs text-indigo-300">you</span>}
-                {spectating && <span className="text-xs text-slate-500">spectating</span>}
-                {isLeader && lobby.status === "waiting" && !isMe && (
-                  <button
-                    onClick={() => kick(uid)}
-                    aria-label={`Kick ${memberName(uid)}`}
-                    title="Kick player"
-                    className="ml-1 rounded-full px-1 text-slate-500 hover:bg-rose-500/20 hover:text-rose-300"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
+        {isSpectator && (
+          <p style={{ marginTop: 14, display: "inline-block", background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.08)", borderRadius: 999, padding: "7px 16px", fontSize: 13, color: "#aeb6c8" }}>
+            👀 You’re spectating — you’ll join when the leader starts the next game.
+          </p>
+        )}
 
-      {isSpectator && (
-        <p className="mt-3 rounded-full bg-slate-800 px-4 py-1.5 text-sm text-slate-300">
-          👀 You’re spectating — you’ll join when the leader starts the next game.
-        </p>
-      )}
-
-      {/* Waiting room */}
-      {lobby.status === "waiting" && (
-        <section className="mt-6 w-full max-w-md rounded-xl bg-slate-800 p-5 text-center">
-          {isLeader ? (
-            <>
-              <h3 className="text-sm font-semibold text-slate-300">Choose a board size</h3>
-              <div className="mt-3 flex flex-wrap justify-center gap-2">
-                {SIZES.map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => setDimension(d)}
-                    className={classNames(
-                      "rounded-md px-3 py-1.5 text-sm font-semibold transition-colors",
-                      (lobby.settings?.dimension ?? 4) === d
-                        ? "bg-indigo-500 text-white"
-                        : "bg-slate-900 text-slate-400 hover:text-white"
+        <div className="lobby-grid" style={{ display: "grid", gridTemplateColumns: inGame ? "1fr" : "1.05fr 1fr", gap: 22, marginTop: 18, alignItems: "start" }}>
+          {/* PLAYERS */}
+          <div>
+            <div style={{ ...sectionLabel, display: "flex", justifyContent: "space-between" }}>
+              <span>PLAYERS</span>
+              <span style={{ color: "#6b7488" }}>{order.length}/{MAX_PLAYERS}</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {slots.map((uid, i) => {
+                if (!uid) {
+                  return (
+                    <div key={`empty-${i}`} style={{ display: "flex", alignItems: "center", gap: 11, border: "1px dashed rgba(255,255,255,.12)", borderRadius: R - 4, padding: "9px 12px", color: "#56607a" }}>
+                      <span style={{ width: 32, height: 32, flex: "0 0 32px", borderRadius: 9, border: "1px dashed rgba(255,255,255,.18)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>+</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>Waiting for player…</span>
+                    </div>
+                  );
+                }
+                const col = playerColor(i);
+                const isMe = uid === user.uid;
+                const isHost = lobby.leader === uid;
+                const spectating = inGame && !isPlayer(uid);
+                return (
+                  <div key={uid} className="c-lobby-row" style={{ display: "flex", alignItems: "center", gap: 11, background: isMe ? hexA(col, 0.1) : "rgba(255,255,255,.03)", border: `1px solid ${isMe ? hexA(col, 0.5) : "rgba(255,255,255,.08)"}`, borderRadius: R - 4, padding: "9px 12px" }}>
+                    <span className="font-display" style={{ width: 32, height: 32, flex: "0 0 32px", borderRadius: 9, background: col, color: "#0b101d", fontWeight: 800, fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 0 14px -2px ${hexA(col, 0.8)}` }}>
+                      {(memberName(uid).trim().charAt(0) || "?").toUpperCase()}
+                    </span>
+                    {isMe ? (
+                      <input
+                        value={nickDraft}
+                        onChange={(e) => { setNickDraft(e.target.value); setNickname(e.target.value); }}
+                        maxLength={16}
+                        style={{ flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none", color: "#e8ecf6", fontWeight: 700, fontSize: 14, fontFamily: "inherit" }}
+                      />
+                    ) : (
+                      <span style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 14, color: "#e8ecf6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{memberName(uid)}</span>
                     )}
-                  >
-                    {d}×{d}
-                  </button>
-                ))}
-              </div>
-              {sets.length > 0 && (
-                <div className="mt-4">
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-slate-500">
-                    Tiles <span className="font-normal normal-case tracking-normal text-slate-600">· pick one or more</span>
-                  </p>
-                  <TileSetPicker
-                    sets={sets}
-                    selectedIds={lobby.settings?.imageSetIds ?? []}
-                    onChange={onSelectSets}
-                  />
-                </div>
-              )}
-              <button
-                onClick={() => startGame()}
-                disabled={order.length < 2}
-                className="mt-5 w-full rounded-md bg-indigo-500 px-4 py-2.5 font-semibold transition-colors hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {order.length < 2 ? "Waiting for another player…" : "Start game"}
-              </button>
-              <p className="mt-3 text-xs text-slate-500">Share the code or Invite link to bring friends in.</p>
-            </>
-          ) : (
-            <>
-              <p className="text-slate-300">
-                Waiting for <span className="font-semibold">{memberName(lobby.leader)}</span> to start the game…
-              </p>
-              {lobby.settings?.imageSetName && (
-                <p className="mt-2 text-xs text-slate-500">Tiles: {lobby.settings.imageSetName}</p>
-              )}
-            </>
-          )}
-        </section>
-      )}
-
-      {/* Game board */}
-      {inGame && game && (
-        <>
-          <div className="mt-5 flex w-full max-w-3xl flex-wrap items-center justify-center gap-2">
-            {(game.turnOrder || []).map((uid) => {
-              const pal = PALETTE[colorIndex(uid, game.turnOrder || [])];
-              const active = game.turnUid === uid && lobby.status === "playing";
-              return (
-                <div
-                  key={uid}
-                  className={classNames(
-                    "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ring-2",
-                    active ? pal.chipActive : "text-slate-400 ring-transparent"
-                  )}
-                >
-                  <span className={classNames("h-2.5 w-2.5 rounded-full", pal.dot)} />
-                  <span className="max-w-[7rem] truncate">{memberName(uid)}</span>
-                  <span className="tabular-nums">{game.scores?.[uid] ?? 0}</span>
-                </div>
-              );
-            })}
+                    {isMe && <span style={{ fontSize: 12, color: "#6b7488", fontWeight: 600 }}>you</span>}
+                    {spectating && <span style={{ fontSize: 11.5, color: "#6b7488" }}>spectating</span>}
+                    {isHost && (
+                      <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".08em", color: "#f5c542", background: "rgba(245,197,66,.12)", border: "1px solid rgba(245,197,66,.3)", borderRadius: 6, padding: "3px 7px", flex: "0 0 auto" }}>HOST</span>
+                    )}
+                    {isLeader && lobby.status === "waiting" && !isMe && (
+                      <button onClick={() => kick(uid)} aria-label={`Kick ${memberName(uid)}`} title="Kick player" style={{ flex: "0 0 auto", background: "transparent", border: "none", color: "#6b7488", cursor: "pointer", fontSize: 14, padding: "2px 4px", borderRadius: 6 }}>✕</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
-          {lobby.status === "playing" && (
-            <div className="mt-2 flex items-center gap-3">
-              <p className="text-sm">
-                {isMyTurn ? (
-                  <span className="font-bold text-indigo-300">Your turn!</span>
-                ) : isSpectator ? (
-                  <span className="text-slate-400">Spectating</span>
-                ) : (
-                  <span className="text-slate-400">
-                    Turn: <span className="font-semibold">{memberName(game.turnUid)}</span>
-                  </span>
-                )}
-              </p>
-              {isLeader && (
-                <button
-                  onClick={() => restartGame()}
-                  className="rounded-md bg-slate-700 px-2.5 py-1 text-xs font-medium hover:bg-slate-600"
-                  title="Deal a new board for everyone (includes spectators)"
-                >
-                  ↻ New game
-                </button>
-              )}
-            </div>
-          )}
+          {/* SETTINGS (waiting room only) */}
+          {!inGame && (
+            <div>
+              <div style={{ ...sectionLabel, display: "flex", justifyContent: "space-between" }}>
+                <span>TILE PACKS</span>
+                <span style={{ color: "#6b7488", fontWeight: 600, letterSpacing: ".04em" }}>{isLeader ? `${selectedPackIds.length} selected` : "set by host"}</span>
+              </div>
+              <PackScroller packs={buildPacks(sets)} selectedIds={selectedPackIds} onToggle={onTogglePack} readOnly={!isLeader} size="sm" />
 
-          <div className="mt-3 flex w-full justify-center">
-            <div className="relative" style={{ width: boardWidth }}>
-              <div
-                style={{
-                  width: "100%",
-                  fontSize: tileFont,
-                  gap: tileGap,
-                  display: "grid",
-                  gridTemplateColumns: `repeat(${dimension}, minmax(0, 1fr))`,
-                }}
-              >
-                {(game.tiles || []).map((emoji, i) => {
-                  const ownerUid = game.matchedBy?.[i];
-                  const isPaired = ownerUid !== undefined;
-                  const isOpen = (game.open || []).includes(i);
-                  const matchClass = isPaired ? PALETTE[colorIndex(ownerUid, game.turnOrder || [])].match : undefined;
-                  const disabled = !isMyTurn || lobby.status !== "playing" || game.resolving || isPaired || isOpen;
+              <div style={{ ...sectionLabel, marginTop: 18 }}>DIFFICULTY</div>
+              <div style={{ display: "flex", gap: 9 }}>
+                {DIFFS.map((d) => {
+                  const on = d.n === (lobby.settings?.dimension ?? 4);
                   return (
-                    <Card
-                      key={i}
-                      emoji={emoji}
-                      open={isOpen}
-                      paired={isPaired}
-                      matchClass={matchClass}
-                      disabled={disabled}
-                      onClick={() => {
-                        if (!disabled) playFlip();
-                        flip(i);
-                      }}
-                    />
+                    <button
+                      key={d.id}
+                      onClick={isLeader ? () => setDimension(d.n) : undefined}
+                      className={isLeader ? "c-diff" : ""}
+                      style={{ flex: 1, border: `1.5px solid ${on ? d.color : "rgba(255,255,255,.1)"}`, background: on ? `rgba(${d.tint},.14)` : "rgba(255,255,255,.02)", boxShadow: on ? `0 0 0 1.5px ${d.color}, 0 0 26px -10px ${d.color}` : "none", borderRadius: R - 2, padding: "12px 6px", cursor: isLeader ? "pointer" : "default", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, fontFamily: "inherit", opacity: !isLeader && !on ? 0.45 : 1, transition: "all .15s" }}
+                    >
+                      <span className="font-display" style={{ fontSize: 14, fontWeight: 700, color: on ? "#fff" : "#cdd4e2" }}>{d.label}</span>
+                      <span className="font-display" style={{ fontSize: 15, fontWeight: 700, color: on ? d.color : "#8b94a8" }}>{d.grid}</span>
+                    </button>
                   );
                 })}
               </div>
 
-              {/* Paused — overlaid on the board so chat stays usable */}
-              {lobby.status === "paused" && (
-                <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-slate-900/80 p-4 backdrop-blur-sm">
-                  <div className="w-full max-w-xs rounded-2xl bg-slate-800/95 p-6 text-center shadow-xl ring-1 ring-slate-700">
-                    <p className="text-4xl">⏸️</p>
-                    <h2 className="mt-2 text-xl font-bold">Game paused</h2>
-                    <p className="mt-1 text-sm text-slate-300">{lobby.pausedReason || "A player left."}</p>
-                    {isLeader ? (
-                      <button
-                        onClick={() => restartGame()}
-                        className="mt-4 rounded-md bg-indigo-500 px-5 py-2 font-semibold transition-colors hover:bg-indigo-400"
-                      >
-                        Restart game
-                      </button>
-                    ) : (
-                      <p className="mt-3 text-sm text-slate-400">
-                        Waiting for <span className="font-semibold">{memberName(lobby.leader)}</span> to restart…
-                      </p>
-                    )}
-                  </div>
-                </div>
+              {isLeader ? (
+                <button
+                  onClick={() => startGame()}
+                  disabled={order.length < 2}
+                  className="c-start font-display"
+                  style={{ width: "100%", marginTop: 20, background: order.length < 2 ? "rgba(255,255,255,.06)" : GRAD, color: order.length < 2 ? "#56607a" : "#fff", border: "none", borderRadius: R - 2, padding: 15, fontWeight: 800, fontSize: 16, letterSpacing: ".03em", cursor: order.length < 2 ? "default" : "pointer", boxShadow: order.length < 2 ? "none" : `0 0 30px -8px ${hexA(ACCENT, 0.9)}` }}
+                >
+                  {order.length < 2 ? "Waiting for another player…" : "▶ Start game"}
+                </button>
+              ) : (
+                <p style={{ marginTop: 18, fontSize: 13.5, color: "#8b94a8" }}>
+                  Waiting for <span style={{ fontWeight: 700, color: "#e8ecf6" }}>{memberName(lobby.leader)}</span> to start the game…
+                </p>
               )}
+            </div>
+          )}
+        </div>
 
-              {/* Finished — overlaid; leader plays again or picks a new size */}
-              {lobby.status === "finished" && (
-                <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-slate-900/80 p-4 backdrop-blur-sm">
-                  <div className="w-full max-w-xs rounded-2xl bg-slate-800/95 p-6 text-center shadow-xl ring-1 ring-slate-700">
-                    <p className="text-4xl">{game.winnerUid === "tie" ? "🤝" : "🏆"}</p>
-                    <h2 className="mt-2 text-xl font-bold">
-                      {game.winnerUid === "tie" ? "It's a tie!" : `${memberName(game.winnerUid || "")} wins!`}
+        {/* In-game board */}
+        {inGame && game && (
+          <div style={{ marginTop: 22 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: 10 }}>
+              {(game.turnOrder || []).map((uid) => {
+                const col = playerColor(colorIndex(uid, game.turnOrder || []));
+                const active = game.turnUid === uid && lobby.status === "playing";
+                return (
+                  <div key={uid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 999, background: active ? hexA(col, 0.16) : "rgba(255,255,255,.04)", border: `1.5px solid ${active ? col : "rgba(255,255,255,.08)"}`, boxShadow: active ? `0 0 20px -6px ${col}` : "none" }}>
+                    <span className="font-display" style={{ width: 22, height: 22, borderRadius: 7, background: col, color: "#0b101d", fontWeight: 800, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {(memberName(uid).trim().charAt(0) || "?").toUpperCase()}
+                    </span>
+                    <span style={{ fontWeight: 700, fontSize: 13.5, color: active ? "#fff" : "#cdd4e2", maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{memberName(uid)}</span>
+                    <span className="font-display" style={{ fontWeight: 800, fontSize: 15, color: col }}>{game.scores?.[uid] ?? 0}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {lobby.status === "playing" && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, marginTop: 8, fontSize: 14 }}>
+                {isMyTurn ? (
+                  <span style={{ fontWeight: 800, color: ACCENT2 }}>Your turn!</span>
+                ) : isSpectator ? (
+                  <span style={{ color: "#9aa3ba" }}>Spectating</span>
+                ) : (
+                  <span style={{ color: "#9aa3ba" }}>Turn: <span style={{ fontWeight: 700, color: "#e8ecf6" }}>{memberName(game.turnUid)}</span></span>
+                )}
+                {isLeader && (
+                  <button onClick={() => restartGame()} className="gb-ctrl" style={{ ...ctrlBtn, height: 30, padding: "0 12px", fontSize: 12.5 }} title="Deal a new board for everyone">↻ New game</button>
+                )}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+              <div style={{ position: "relative", width: `min(92vw, ${board}px)` }}>
+                <div style={{ display: "grid", gridTemplateColumns: `repeat(${dimension}, 1fr)`, gap, fontSize: glyphFont }}>
+                  {(game.tiles || []).map((emoji, i) => {
+                    const ownerUid = game.matchedBy?.[i];
+                    const isPaired = ownerUid !== undefined;
+                    const isOpen = (game.open || []).includes(i);
+                    const matchColor = isPaired ? playerColor(colorIndex(ownerUid, game.turnOrder || [])) : ACCENT;
+                    const disabled = !isMyTurn || lobby.status !== "playing" || game.resolving || isPaired || isOpen;
+                    return (
+                      <Card
+                        key={i}
+                        emoji={emoji}
+                        open={isOpen}
+                        paired={isPaired}
+                        matchColor={matchColor}
+                        radius={tileR}
+                        disabled={disabled}
+                        onClick={() => { if (!disabled) playFlip(); flip(i); }}
+                      />
+                    );
+                  })}
+                </div>
+
+                {/* Paused — overlaid on the board so chat stays usable */}
+                {lobby.status === "paused" && (
+                  <BoardOverlay>
+                    <div style={{ fontSize: 40 }}>⏸️</div>
+                    <h2 className="font-display" style={{ fontSize: 22, fontWeight: 700, margin: "8px 0 4px" }}>Game paused</h2>
+                    <p style={{ fontSize: 13.5, color: "#9aa3ba", margin: 0 }}>{lobby.pausedReason || "A player left."}</p>
+                    {isLeader ? (
+                      <button onClick={() => restartGame()} className="c-start font-display" style={{ marginTop: 16, background: GRAD, color: "#fff", border: "none", borderRadius: R - 2, padding: "12px 28px", fontWeight: 800, fontSize: 15, cursor: "pointer", boxShadow: `0 0 30px -8px ${hexA(ACCENT, 0.9)}` }}>Restart game</button>
+                    ) : (
+                      <p style={{ marginTop: 12, fontSize: 13.5, color: "#9aa3ba" }}>Waiting for <span style={{ fontWeight: 700, color: "#e8ecf6" }}>{memberName(lobby.leader)}</span> to restart…</p>
+                    )}
+                  </BoardOverlay>
+                )}
+
+                {/* Finished — leader plays again or picks a new size */}
+                {lobby.status === "finished" && (
+                  <BoardOverlay>
+                    <div style={{ fontSize: 40 }}>{game.winnerUid === "tie" ? "🤝" : "🏆"}</div>
+                    <h2 className="font-display" style={{ fontSize: 22, fontWeight: 700, margin: "8px 0 6px" }}>
+                      {game.winnerUid === "tie" ? "It’s a tie!" : `${memberName(game.winnerUid || "")} wins!`}
                     </h2>
-                    <div className="mt-2 flex flex-wrap justify-center gap-x-2 gap-y-0.5 text-sm text-slate-300">
+                    <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "2px 10px", fontSize: 13.5 }}>
                       {(game.turnOrder || []).map((pid, i) => (
-                        <span key={pid} className={classNames("font-semibold", PALETTE[i % PALETTE.length].text)}>
-                          {memberName(pid)} {game.scores?.[pid] ?? 0}
-                        </span>
+                        <span key={pid} style={{ fontWeight: 700, color: playerColor(i) }}>{memberName(pid)} {game.scores?.[pid] ?? 0}</span>
                       ))}
                     </div>
                     {isLeader ? (
                       <>
-                        <button
-                          onClick={() => startGame()}
-                          className="mt-4 w-full rounded-md bg-indigo-500 px-4 py-2 font-semibold transition-colors hover:bg-indigo-400"
-                        >
+                        <button onClick={() => startGame()} className="c-start font-display" style={{ marginTop: 16, width: "100%", background: GRAD, color: "#fff", border: "none", borderRadius: R - 2, padding: 12, fontWeight: 800, fontSize: 15, cursor: "pointer", boxShadow: `0 0 30px -8px ${hexA(ACCENT, 0.9)}` }}>
                           Play again ({dimension}×{dimension})
                         </button>
-                        <p className="mt-3 text-[0.7rem] font-semibold uppercase tracking-wide text-slate-500">
-                          or pick a new size
-                        </p>
-                        <div className="mt-1.5 flex flex-wrap justify-center gap-1.5">
-                          {SIZES.map((d) => (
-                            <button
-                              key={d}
-                              onClick={() => startGame(d)}
-                              className={classNames(
-                                "rounded-md px-2.5 py-1 text-xs font-semibold transition-colors",
-                                d === dimension
-                                  ? "bg-indigo-500/30 text-indigo-200 ring-1 ring-indigo-400"
-                                  : "bg-slate-900 text-slate-300 hover:text-white"
-                              )}
-                            >
-                              {d}×{d}
-                            </button>
+                        <p style={{ marginTop: 12, fontSize: 10.5, fontWeight: 800, letterSpacing: ".08em", color: "#6b7488", textTransform: "uppercase" }}>or pick a new size</p>
+                        <div style={{ marginTop: 8, display: "flex", justifyContent: "center", gap: 8 }}>
+                          {DIFFS.map((d) => (
+                            <button key={d.id} onClick={() => startGame(d.n)} className="c-diff" style={{ borderRadius: 9, border: `1.5px solid ${d.n === dimension ? d.color : "rgba(255,255,255,.12)"}`, background: d.n === dimension ? `rgba(${d.tint},.16)` : "rgba(255,255,255,.03)", color: d.n === dimension ? "#fff" : "#cdd4e2", padding: "6px 12px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>{d.grid}</button>
                           ))}
                         </div>
                       </>
                     ) : (
-                      <p className="mt-4 text-sm text-slate-300">
-                        Waiting for <span className="font-semibold">{memberName(lobby.leader)}</span> to start a new game…
-                      </p>
+                      <p style={{ marginTop: 14, fontSize: 13.5, color: "#9aa3ba" }}>Waiting for <span style={{ fontWeight: 700, color: "#e8ecf6" }}>{memberName(lobby.leader)}</span> to start a new game…</p>
                     )}
-                  </div>
-                </div>
-              )}
+                  </BoardOverlay>
+                )}
+              </div>
             </div>
           </div>
-        </>
-      )}
+        )}
 
-      {/* Chat */}
-      <section className="mt-6 w-full max-w-3xl">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-500">Chat</h2>
-        <div className="mt-2 rounded-xl bg-slate-800 p-3">
-          <div className="h-40 space-y-1 overflow-y-auto pr-1 text-sm">
-            {chatMessages.length === 0 ? (
-              <p className="text-slate-500">No messages yet. Say hi! 👋</p>
-            ) : (
-              chatMessages.map((m) => {
-                if (m.system) {
+        {/* Chat */}
+        <div style={{ marginTop: 24 }}>
+          <div style={sectionLabel}>CHAT</div>
+          <div style={{ borderRadius: R, background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.08)", padding: 12 }}>
+            <div style={{ height: 168, overflowY: "auto", paddingRight: 4, fontSize: 13.5, display: "flex", flexDirection: "column", gap: 3 }} className="no-scrollbar">
+              {chatMessages.length === 0 ? (
+                <p style={{ color: "#56607a" }}>No messages yet. Say hi! 👋</p>
+              ) : (
+                chatMessages.map((m) => {
+                  if (m.system) {
+                    return <div key={m.id} style={{ textAlign: "center", fontStyle: "italic", color: "#6b7488", fontSize: 12, padding: "2px 0" }}>{m.text}</div>;
+                  }
+                  const idx = order.indexOf(m.uid ?? "");
+                  const col = idx >= 0 ? playerColor(idx) : "#9aa3ba";
+                  const sender = lobby.members?.[m.uid ?? ""]?.nickname || m.name || "Player";
                   return (
-                    <div key={m.id} className="py-0.5 text-center text-xs italic text-slate-500">
-                      {m.text}
+                    <div key={m.id} style={{ wordBreak: "break-word" }}>
+                      <span style={{ fontWeight: 700, color: col }}>{sender}</span>
+                      <span style={{ color: "#56607a" }}>: </span>
+                      <span style={{ color: "#dfe4f0" }}>{m.text}</span>
                     </div>
                   );
-                }
-                const idx = order.indexOf(m.uid ?? "");
-                const color = idx >= 0 ? PALETTE[idx % PALETTE.length].text : "text-slate-400";
-                // Prefer the sender's current lobby nickname; fall back to the
-                // name stored with the message (e.g. for players who've left).
-                const sender = lobby.members?.[m.uid ?? ""]?.nickname || m.name || "Player";
-                return (
-                  <div key={m.id} className="break-words">
-                    <span className={classNames("font-semibold", color)}>{sender}</span>
-                    <span className="text-slate-500">: </span>
-                    <span className="text-slate-200">{m.text}</span>
-                  </div>
-                );
-              })
-            )}
-            <div ref={chatEndRef} />
+                })
+              )}
+              <div ref={chatEndRef} />
+            </div>
+            <form onSubmit={onSendChat} style={{ marginTop: 8, display: "flex", gap: 8 }}>
+              <input
+                value={chatDraft}
+                onChange={(e) => setChatDraft(e.target.value)}
+                maxLength={200}
+                placeholder="Message…"
+                style={{ flex: 1, borderRadius: R - 4, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.1)", padding: "10px 12px", fontSize: 13.5, color: "#e8ecf6", outline: "none", fontFamily: "inherit" }}
+              />
+              <button type="submit" disabled={!chatDraft.trim()} className="c-start font-display" style={{ borderRadius: R - 4, background: GRAD, color: "#fff", border: "none", padding: "0 20px", fontSize: 14, fontWeight: 700, cursor: chatDraft.trim() ? "pointer" : "default", opacity: chatDraft.trim() ? 1 : 0.5 }}>Send</button>
+            </form>
           </div>
-          <form onSubmit={onSendChat} className="mt-2 flex gap-2">
-            <input
-              value={chatDraft}
-              onChange={(e) => setChatDraft(e.target.value)}
-              maxLength={200}
-              placeholder="Message…"
-              className="flex-1 rounded-md bg-slate-900 px-3 py-2 text-sm text-slate-100 ring-1 ring-slate-700 focus:outline-none focus:ring-indigo-400"
-            />
-            <button
-              type="submit"
-              disabled={!chatDraft.trim()}
-              className="rounded-md bg-indigo-500 px-4 py-2 text-sm font-medium transition-colors hover:bg-indigo-400 disabled:opacity-50"
-            >
-              Send
-            </button>
-          </form>
         </div>
-      </section>
+      </div>
 
-    </main>
+      <style>{`@media (max-width: 680px) { .lobby-grid { grid-template-columns: 1fr !important; } }`}</style>
+    </div>
+  );
+}
+
+const ctrlBtn: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  height: 40,
+  borderRadius: RADIUS - 4,
+  background: "rgba(255,255,255,.05)",
+  border: "1px solid rgba(255,255,255,.1)",
+  color: "#dfe4f0",
+  fontWeight: 600,
+  fontSize: 14,
+  cursor: "pointer",
+  fontFamily: "inherit",
+  transition: "all .15s",
+};
+const loginBtn: React.CSSProperties = {
+  marginTop: 16,
+  background: "#fff",
+  color: "#1a1f2e",
+  border: "none",
+  borderRadius: 10,
+  padding: "10px 18px",
+  fontWeight: 700,
+  fontSize: 14,
+  cursor: "pointer",
+  fontFamily: "inherit",
+};
+
+function BoardOverlay({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: RADIUS, background: "rgba(7,11,21,.78)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", padding: 16 }}>
+      <div style={{ width: "min(320px, 100%)", textAlign: "center", background: PANEL_BG, border: "1px solid rgba(255,255,255,.1)", borderRadius: RADIUS, padding: 24, boxShadow: "0 30px 70px -30px rgba(0,0,0,.8)" }}>
+        {children}
+      </div>
+    </div>
   );
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="flex min-h-screen w-full flex-col items-center bg-slate-900 px-4 pt-24 text-slate-100">
-      <div className="w-full max-w-md">{children}</div>
-    </main>
+    <div style={{ minHeight: "100vh", background: SCREEN_BG, color: "#e8ecf6", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ width: "min(440px, 100%)" }}>{children}</div>
+    </div>
   );
+}
+
+function Joining() {
+  return <p style={{ color: "#9aa3ba", textAlign: "center" }}>Joining…</p>;
 }
 
 function Notice({ text, children }: { text: string; children?: React.ReactNode }) {
   return (
-    <div className="rounded-lg bg-slate-800 p-6 text-center">
-      <p className="text-slate-300">{text}</p>
+    <div style={{ background: PANEL_BG, border: "1px solid rgba(255,255,255,.1)", borderRadius: RADIUS + 4, padding: 28, textAlign: "center", boxShadow: `0 30px 70px -30px rgba(0,0,0,.8)` }}>
+      <p style={{ color: "#cdd4e2", margin: 0 }}>{text}</p>
       {children}
     </div>
   );
@@ -585,10 +567,7 @@ function Notice({ text, children }: { text: string; children?: React.ReactNode }
 
 function BackToMenu({ router }: { router: ReturnType<typeof useRouter> }) {
   return (
-    <button
-      onClick={() => router.push("/")}
-      className="mt-4 rounded-md bg-indigo-500 px-4 py-2 font-medium hover:bg-indigo-400"
-    >
+    <button onClick={() => router.push("/")} className="c-start font-display" style={{ marginTop: 16, background: GRAD, color: "#fff", border: "none", borderRadius: RADIUS - 2, padding: "12px 24px", fontWeight: 800, fontSize: 15, cursor: "pointer", boxShadow: `0 0 30px -8px ${hexA(ACCENT, 0.9)}` }}>
       Back to menu
     </button>
   );

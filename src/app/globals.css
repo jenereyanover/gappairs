@@ -3,31 +3,170 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 214, 219, 220;
-  --background-end-rgb: 255, 255, 255;
+  --arcade-bg: #070b15;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --foreground-rgb: 255, 255, 255;
-    --background-start-rgb: 0, 0, 0;
-    --background-end-rgb: 0, 0, 0;
-  }
+html,
+body {
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
+  color: #e8ecf6;
+  background: var(--arcade-bg);
+  font-family: var(--font-space), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Display font (Fredoka) for headings, wordmarks, big numbers. */
+.font-display {
+  font-family: var(--font-fredoka), var(--font-space), sans-serif;
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  /* Hide scrollbars on the horizontal pack scroller. */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ---- Arcade Neon keyframes ---- */
+@keyframes gp-flip {
+  0%,
+  38% {
+    transform: rotateY(0deg);
+  }
+  50%,
+  88% {
+    transform: rotateY(180deg);
+  }
+  100% {
+    transform: rotateY(360deg);
+  }
+}
+@keyframes gp-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(var(--r, 0deg));
+  }
+  50% {
+    transform: translateY(-12px) rotate(var(--r, 0deg));
+  }
+}
+@keyframes gb-pop {
+  0% {
+    transform: scale(0.82);
+  }
+  60% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes c-modal-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes c-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes c-row-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---- Arcade Neon interaction classes (override inline styles) ---- */
+.c-modal-backdrop {
+  animation: c-modal-in 0.18s ease-out;
+}
+.c-modal-card {
+  animation: c-card-in 0.24s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.c-pack:hover {
+  transform: translateY(-2px) !important;
+}
+.c-diff:hover {
+  transform: translateY(-3px);
+}
+.c-mode:hover {
+  filter: brightness(1.12);
+}
+.c-count:hover {
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+.c-namefield:focus-within {
+  border-color: rgba(255, 255, 255, 0.32) !important;
+}
+.c-arrow:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+}
+.c-start:hover {
+  transform: translateY(-2px);
+}
+.c-play:hover {
+  transform: translateY(-2px) scale(1.02);
+}
+.c-friend:hover {
+  filter: brightness(1.15);
+}
+.c-close:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+}
+.c-lobby-row {
+  animation: c-row-in 0.26s ease-out;
+}
+.gb-tile:not(:disabled):hover {
+  transform: translateY(-3px);
+}
+.gb-ctrl:hover {
+  filter: brightness(1.12);
+}
+.lb-row {
+  transition: transform 0.14s, background 0.15s;
+}
+.lb-row:hover {
+  transform: translateX(3px);
+}
+.lb-tab:hover {
+  filter: brightness(1.12);
+}
+.lb-back:hover {
+  color: #e8ecf6 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gp-flip-tile,
+  .c-modal-backdrop,
+  .c-modal-card,
+  .c-lobby-row {
+    animation: none !important;
   }
 }
