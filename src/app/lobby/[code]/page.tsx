@@ -56,6 +56,7 @@ export default function LobbyPage() {
     setImageSet,
     startGame,
     restartGame,
+    setPaused,
     flip,
     kick,
     sendChat,
@@ -139,6 +140,7 @@ export default function LobbyPage() {
 
   // In-game chat overlay: Enter opens it (when not typing); resets out of game.
   const [chatOpen, setChatOpen] = useState(false);
+  const [confirmExit, setConfirmExit] = useState(false);
   useEffect(() => {
     const ig = !!lobby && lobby.status !== "waiting" && !!lobby.game;
     if (!ig) {
@@ -307,10 +309,15 @@ export default function LobbyPage() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <button onClick={toggleMute} aria-label={muted ? "Unmute" : "Mute"} aria-pressed={muted} className="gb-ctrl" style={{ ...ctrlBtn, width: 42, padding: 0, fontSize: 17 }}>{muted ? "🔇" : "🔊"}</button>
-            {isLeader && lobby.status === "playing" && (
-              <button onClick={() => restartGame()} className="gb-ctrl font-display" style={{ ...ctrlBtn, background: GRAD, color: "#fff", border: "none", fontWeight: 700, padding: "0 16px" }} title="Deal a new board for everyone">↻ New game</button>
+            {isLeader && (lobby.status === "playing" || (lobby.status === "paused" && lobby.pausedReason === "__host__")) && (
+              <button onClick={() => setPaused(lobby.status === "playing")} className="gb-ctrl" style={{ ...ctrlBtn, padding: "0 16px" }}>
+                {lobby.status === "playing" ? "❚❚ Pause" : "▶ Resume"}
+              </button>
             )}
-            <button onClick={onLeave} className="gb-ctrl" style={{ ...ctrlBtn, padding: "0 18px" }}>Leave</button>
+            {isLeader && (lobby.status === "playing" || lobby.status === "paused") && (
+              <button onClick={() => restartGame()} className="gb-ctrl font-display" style={{ ...ctrlBtn, background: GRAD, color: "#fff", border: "none", fontWeight: 700, padding: "0 16px" }} title="Deal a new board for everyone">Restart</button>
+            )}
+            <button onClick={() => setConfirmExit(true)} className="gb-ctrl" style={{ ...ctrlBtn, padding: "0 18px" }}>Exit</button>
           </div>
         </div>
 
@@ -346,16 +353,24 @@ export default function LobbyPage() {
               })}
             </div>
 
-            {lobby.status === "playing" && (
-              <GameChat messages={chatForGame} onSend={(t) => sendChat(t)} open={chatOpen} setOpen={setChatOpen} />
-            )}
-
             {lobby.status === "paused" && (
               <BoardOverlay>
                 <div style={{ fontSize: 40 }}>⏸️</div>
-                <h2 className="font-display" style={{ fontSize: 22, fontWeight: 700, margin: "8px 0 4px" }}>Game paused</h2>
-                <p style={{ fontSize: 13.5, color: "#9aa3ba", margin: 0 }}>{lobby.pausedReason || "A player left."}</p>
-                {isLeader ? (
+                <h2 className="font-display" style={{ fontSize: 22, fontWeight: 700, margin: "8px 0 4px" }}>
+                  {lobby.pausedReason === "__host__" ? "Paused" : "Game paused"}
+                </h2>
+                <p style={{ fontSize: 13.5, color: "#9aa3ba", margin: 0 }}>
+                  {lobby.pausedReason === "__host__"
+                    ? isLeader
+                      ? "The board is hidden while paused."
+                      : "Waiting for the host to resume…"
+                    : lobby.pausedReason || "A player left."}
+                </p>
+                {lobby.pausedReason === "__host__" ? (
+                  isLeader && (
+                    <button onClick={() => setPaused(false)} className="c-start font-display" style={{ marginTop: 16, background: GRAD, color: "#fff", border: "none", borderRadius: R - 2, padding: "12px 28px", fontWeight: 800, fontSize: 15, cursor: "pointer", boxShadow: `0 0 30px -8px ${hexA(ACCENT, 0.9)}` }}>▶ Resume</button>
+                  )
+                ) : isLeader ? (
                   <button onClick={() => restartGame()} className="c-start font-display" style={{ marginTop: 16, background: GRAD, color: "#fff", border: "none", borderRadius: R - 2, padding: "12px 28px", fontWeight: 800, fontSize: 15, cursor: "pointer", boxShadow: `0 0 30px -8px ${hexA(ACCENT, 0.9)}` }}>Restart game</button>
                 ) : (
                   <p style={{ marginTop: 12, fontSize: 13.5, color: "#9aa3ba" }}>Waiting for <span style={{ fontWeight: 700, color: "#e8ecf6" }}>{memberName(lobby.leader)}</span> to restart…</p>
@@ -394,6 +409,30 @@ export default function LobbyPage() {
             )}
           </div>
         </div>
+
+        {/* chat — full-screen overlay (anchored to the screen, not the board) */}
+        {lobby.status === "playing" && (
+          <GameChat messages={chatForGame} onSend={(t) => sendChat(t)} open={chatOpen} setOpen={setChatOpen} />
+        )}
+
+        {/* exit confirmation */}
+        {confirmExit && (
+          <div
+            className="c-modal-backdrop"
+            onClick={(e) => e.target === e.currentTarget && setConfirmExit(false)}
+            style={{ position: "fixed", inset: 0, zIndex: 115, background: "rgba(5,8,16,.74)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+          >
+            <div className="c-modal-card" style={{ width: "min(380px, 100%)", background: PANEL_BG, border: "1px solid rgba(255,255,255,.1)", borderRadius: R + 6, padding: "clamp(22px,4vw,28px)", textAlign: "center", boxShadow: "0 40px 90px -30px rgba(0,0,0,.8)" }}>
+              <div style={{ fontSize: 32, marginBottom: 6 }}>🚪</div>
+              <h2 className="font-display" style={{ fontSize: 21, fontWeight: 700, margin: "0 0 6px" }}>Leave the game?</h2>
+              <p style={{ fontSize: 13.5, color: "#8b94a8", margin: "0 0 22px", lineHeight: 1.5 }}>You’ll leave the lobby and return to the menu.</p>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setConfirmExit(false)} className="c-friend" style={{ flex: 1, background: "rgba(255,255,255,.06)", color: "#dfe4f0", border: "1px solid rgba(255,255,255,.1)", borderRadius: R - 4, padding: 13, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>Keep playing</button>
+                <button onClick={onLeave} className="gb-ctrl" style={{ flex: 1, background: "rgba(244,63,94,.16)", color: "#ff7a8f", border: "1px solid rgba(244,63,94,.4)", borderRadius: R - 4, padding: 13, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>Leave</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

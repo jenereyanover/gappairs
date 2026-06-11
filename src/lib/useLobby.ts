@@ -30,6 +30,7 @@ export interface UseLobby {
   setImageSet: (ids: string[], images: string[], name: string | null) => void;
   startGame: (dimension?: number) => void;
   restartGame: (dimension?: number) => void;
+  setPaused: (paused: boolean) => void;
   flip: (index: number) => void;
   kick: (uid: string) => void;
   sendChat: (text: string) => void;
@@ -196,6 +197,22 @@ export function useLobby(code: string, uid: string | undefined, myNickname: stri
     [code, uid, lobby?.leader]
   );
 
+  // Leader-only pause/resume, synced to all clients via the lobby status.
+  // Uses the "__host__" reason to distinguish from a disconnect-pause.
+  const setPaused = useCallback(
+    (paused: boolean) => {
+      if (lobby?.leader !== uid) return;
+      if (paused) {
+        if (lobby?.status !== "playing") return;
+        updateLobby(code, { status: "paused", pausedReason: "__host__" });
+      } else {
+        if (lobby?.status !== "paused") return;
+        updateLobby(code, { status: "playing", pausedReason: null });
+      }
+    },
+    [code, uid, lobby?.leader, lobby?.status]
+  );
+
   // Deal a fresh board for everyone currently in the lobby (start, restart, or
   // a new game that folds in any spectators who joined mid-game).
   const startGame = useCallback(
@@ -341,6 +358,7 @@ export function useLobby(code: string, uid: string | undefined, myNickname: stri
     setImageSet,
     startGame,
     restartGame: startGame,
+    setPaused,
     flip,
     kick,
     sendChat,
