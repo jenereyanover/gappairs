@@ -57,6 +57,7 @@ export default function LobbyPage() {
     startGame,
     restartGame,
     setPaused,
+    backToLobby,
     flip,
     kick,
     sendChat,
@@ -170,6 +171,32 @@ export default function LobbyPage() {
     const id = setInterval(() => setSecs((s) => s + 1), 1000);
     return () => clearInterval(id);
   }, [lobby?.status]);
+
+  // When a game ends: non-leaders get a 10s countdown, then auto-return to the
+  // lobby waiting room (local view change — the leader controls the real status).
+  const [leftResult, setLeftResult] = useState(false);
+  const [resultSecs, setResultSecs] = useState(10);
+  useEffect(() => {
+    if (lobby?.status !== "finished") {
+      setLeftResult(false);
+      setResultSecs(10);
+    }
+  }, [lobby?.status]);
+  useEffect(() => {
+    if (lobby?.status !== "finished" || isLeader) return;
+    setResultSecs(10);
+    const id = setInterval(() => {
+      setResultSecs((s) => {
+        if (s <= 1) {
+          clearInterval(id);
+          setLeftResult(true);
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [lobby?.status, isLeader]);
   const onSendChat = (e: React.FormEvent) => {
     e.preventDefault();
     const t = chatDraft.trim();
@@ -281,7 +308,8 @@ export default function LobbyPage() {
   );
 
   // ── Full-screen in-game view (matches the design's GameBoard) ──
-  if (inGame && game) {
+  // (a returned non-leader drops back to the waiting room via `leftResult`)
+  if (inGame && game && !leftResult) {
     const turnCol = playerColor(colorIndex(game.turnUid, game.turnOrder || []));
     return (
       <div style={{ position: "fixed", inset: 0, zIndex: 90, background: SCREEN_BG, color: "#e8ecf6", display: "flex", flexDirection: "column", overflowY: "auto" }}>
@@ -317,7 +345,9 @@ export default function LobbyPage() {
             {isLeader && (lobby.status === "playing" || lobby.status === "paused") && (
               <button onClick={() => restartGame()} className="gb-ctrl font-display" style={{ ...ctrlBtn, background: GRAD, color: "#fff", border: "none", fontWeight: 700, padding: "0 16px" }} title="Deal a new board for everyone">Restart</button>
             )}
-            <button onClick={() => setConfirmExit(true)} className="gb-ctrl" style={{ ...ctrlBtn, padding: "0 18px" }}>Exit</button>
+            {lobby.status !== "finished" && (
+              <button onClick={() => setConfirmExit(true)} className="gb-ctrl" style={{ ...ctrlBtn, padding: "0 18px" }}>Exit</button>
+            )}
           </div>
         </div>
 
@@ -391,27 +421,23 @@ export default function LobbyPage() {
                   ))}
                 </div>
                 {isLeader ? (
-                  <>
-                    <button onClick={() => startGame()} className="c-start font-display" style={{ marginTop: 16, width: "100%", background: GRAD, color: "#fff", border: "none", borderRadius: R - 2, padding: 12, fontWeight: 800, fontSize: 15, cursor: "pointer", boxShadow: `0 0 30px -8px ${hexA(ACCENT, 0.9)}` }}>
-                      Play again ({dimension}×{dimension})
-                    </button>
-                    <p style={{ marginTop: 12, fontSize: 10.5, fontWeight: 800, letterSpacing: ".08em", color: "#6b7488", textTransform: "uppercase" }}>or pick a new size</p>
-                    <div style={{ marginTop: 8, display: "flex", justifyContent: "center", gap: 8 }}>
-                      {DIFFS.map((d) => (
-                        <button key={d.id} onClick={() => startGame(d.n)} className="c-diff" style={{ borderRadius: 9, border: `1.5px solid ${d.n === dimension ? d.color : "rgba(255,255,255,.12)"}`, background: d.n === dimension ? `rgba(${d.tint},.16)` : "rgba(255,255,255,.03)", color: d.n === dimension ? "#fff" : "#cdd4e2", padding: "6px 12px", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>{d.grid}</button>
-                      ))}
-                    </div>
-                  </>
+                  <div style={{ marginTop: 18, display: "flex", gap: 10 }}>
+                    <button onClick={onLeave} className="c-friend" style={{ flex: 1, background: "rgba(255,255,255,.06)", color: "#dfe4f0", border: "1px solid rgba(255,255,255,.1)", borderRadius: R - 4, padding: 13, fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>Leave</button>
+                    <button onClick={() => backToLobby()} className="c-start font-display" style={{ flex: 1, background: GRAD, color: "#fff", border: "none", borderRadius: R - 4, padding: 13, fontWeight: 800, fontSize: 14.5, cursor: "pointer", boxShadow: `0 0 30px -8px ${hexA(ACCENT, 0.9)}` }}>Back to Lobby</button>
+                  </div>
                 ) : (
-                  <p style={{ marginTop: 14, fontSize: 13.5, color: "#9aa3ba" }}>Waiting for <span style={{ fontWeight: 700, color: "#e8ecf6" }}>{memberName(lobby.leader)}</span> to start a new game…</p>
+                  <>
+                    <p style={{ marginTop: 16, fontSize: 13, color: "#9aa3ba" }}>Returning to lobby in <span className="font-display" style={{ fontWeight: 800, color: ACCENT2, fontVariantNumeric: "tabular-nums" }}>{resultSecs}s</span></p>
+                    <button onClick={onLeave} className="c-friend" style={{ marginTop: 12, background: "rgba(255,255,255,.06)", color: "#dfe4f0", border: "1px solid rgba(255,255,255,.1)", borderRadius: R - 4, padding: "11px 30px", fontWeight: 700, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>Leave</button>
+                  </>
                 )}
               </BoardOverlay>
             )}
           </div>
         </div>
 
-        {/* chat — full-screen overlay (anchored to the screen, not the board) */}
-        {lobby.status === "playing" && (
+        {/* chat — full-screen overlay (anchored to the screen, not the board); stays after the game ends */}
+        {(lobby.status === "playing" || lobby.status === "finished") && (
           <GameChat messages={chatForGame} onSend={(t) => sendChat(t)} open={chatOpen} setOpen={setChatOpen} />
         )}
 
@@ -465,7 +491,7 @@ export default function LobbyPage() {
           </p>
         )}
 
-        <div className="lobby-grid" style={{ display: "grid", gridTemplateColumns: inGame ? "1fr" : "1.05fr 1fr", gap: 22, marginTop: 18, alignItems: "start" }}>
+        <div className="lobby-grid" style={{ display: "grid", gridTemplateColumns: "1.05fr 1fr", gap: 22, marginTop: 18, alignItems: "start" }}>
           {/* PLAYERS */}
           <div style={{ minWidth: 0 }}>
             <div style={{ ...sectionLabel, display: "flex", justifyContent: "space-between" }}>
@@ -515,8 +541,8 @@ export default function LobbyPage() {
             </div>
           </div>
 
-          {/* SETTINGS (waiting room only) */}
-          {!inGame && (
+          {/* SETTINGS (waiting room) */}
+          {(!inGame || leftResult) && (
             <div style={{ minWidth: 0 }}>
               <div style={{ ...sectionLabel, display: "flex", justifyContent: "space-between" }}>
                 <span>TILE PACKS</span>

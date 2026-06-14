@@ -31,6 +31,7 @@ export interface UseLobby {
   startGame: (dimension?: number) => void;
   restartGame: (dimension?: number) => void;
   setPaused: (paused: boolean) => void;
+  backToLobby: () => void;
   flip: (index: number) => void;
   kick: (uid: string) => void;
   sendChat: (text: string) => void;
@@ -213,6 +214,12 @@ export function useLobby(code: string, uid: string | undefined, myNickname: stri
     [code, uid, lobby?.leader, lobby?.status]
   );
 
+  // Leader-only: end the current game and return everyone to the waiting room.
+  const backToLobby = useCallback(() => {
+    if (lobby?.leader !== uid) return;
+    updateLobby(code, { status: "waiting", game: null, pausedReason: null });
+  }, [code, uid, lobby?.leader]);
+
   // Deal a fresh board for everyone currently in the lobby (start, restart, or
   // a new game that folds in any spectators who joined mid-game).
   const startGame = useCallback(
@@ -359,6 +366,7 @@ export function useLobby(code: string, uid: string | undefined, myNickname: stri
     startGame,
     restartGame: startGame,
     setPaused,
+    backToLobby,
     flip,
     kick,
     sendChat,
