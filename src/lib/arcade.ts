@@ -42,3 +42,25 @@ export function hexA(hex: string, a: number): string {
   const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
 }
+
+// Tile size clamp (px): tiles grow to fill the available space but never
+// exceed MAX or shrink below MIN.
+export const TILE_MIN = 40;
+export const TILE_MAX = 132;
+
+/**
+ * Responsive board metrics for an n×n grid. Each tile is a CSS `clamp()` that
+ * fills the smaller of the available width/height (minus gaps) divided by n,
+ * bounded to [TILE_MIN, TILE_MAX]px — so tiles get bigger on roomier screens
+ * and the board stays square. `tile`/`font` are CSS length strings.
+ */
+export function boardMetrics(n: number): { gap: number; tile: string; font: string; radius: number } {
+  const gap = n <= 4 ? 12 : n <= 6 ? 10 : 7;
+  const tile = `clamp(${TILE_MIN}px, calc((min(92vw, 82vh) - ${(n - 1) * gap}px) / ${n}), ${TILE_MAX}px)`;
+  return {
+    gap,
+    tile,
+    font: `calc(${tile} * 0.5)`,
+    radius: Math.max(6, Math.min(RADIUS, n > 6 ? 9 : 14)),
+  };
+}

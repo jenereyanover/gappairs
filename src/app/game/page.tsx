@@ -9,7 +9,7 @@ import { EMOJI_SET, generateTiles, mixFaces } from "utils/helpers";
 import { saveGameResult } from "lib/games";
 import { isMuted, playFlip, playMatch, playWrong, setMuted } from "utils/sound";
 import { formatTime, playerName, playerColor } from "utils/players";
-import { ACCENT, ACCENT2, GRAD, RADIUS, SCREEN_BG, PANEL_BG, diffByN, hexA } from "lib/arcade";
+import { ACCENT, ACCENT2, GRAD, RADIUS, SCREEN_BG, PANEL_BG, diffByN, hexA, boardMetrics } from "lib/arcade";
 
 const chip: React.CSSProperties = {
   display: "inline-flex",
@@ -181,12 +181,8 @@ export default function GamePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameOver]);
 
-  // sizing by difficulty
-  const board = dimension <= 4 ? 460 : dimension <= 6 ? 620 : 760;
-  const gap = dimension <= 4 ? 12 : dimension <= 6 ? 9 : 6;
-  const glyphFont =
-    dimension <= 4 ? "clamp(26px, 7vmin, 46px)" : dimension <= 6 ? "clamp(17px, 4.6vmin, 32px)" : "clamp(11px, 3.2vmin, 24px)";
-  const tileR = Math.max(6, Math.min(RADIUS, dimension > 6 ? 9 : 14));
+  // Responsive tile sizing — tiles grow to fill the space, clamped [min,max].
+  const { gap, tile, font: glyphFont, radius: tileR } = boardMetrics(dimension);
 
   const ranking = multiplayer
     ? scores.map((s, i) => ({ i, score: s })).sort((a, b) => b.score - a.score)
@@ -325,9 +321,8 @@ export default function GamePage() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: `repeat(${dimension}, 1fr)`,
+            gridTemplateColumns: `repeat(${dimension}, ${tile})`,
             gap,
-            width: `min(92vw, 86vh, ${board}px)`,
             fontSize: glyphFont,
           }}
         >

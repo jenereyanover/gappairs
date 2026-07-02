@@ -10,7 +10,7 @@ import { rtdbEnabled } from "lib/firebase";
 import { fetchImageSets, type ImageSet } from "lib/imageSets";
 import { isMuted, playFlip, playMatch, playWrong, setMuted } from "utils/sound";
 import { playerColor, formatTime } from "utils/players";
-import { ACCENT, ACCENT2, GRAD, RADIUS, SCREEN_BG, PANEL_BG, DIFFS, hexA } from "lib/arcade";
+import { ACCENT, ACCENT2, GRAD, RADIUS, SCREEN_BG, PANEL_BG, DIFFS, hexA, boardMetrics } from "lib/arcade";
 import PackScroller, { buildPacks } from "components/arcade/PackScroller";
 import GameChat, { type ChatMsg } from "components/arcade/GameChat";
 
@@ -284,12 +284,9 @@ export default function LobbyPage() {
     onSelectSets(imageSetIds.includes(id) ? imageSetIds.filter((x) => x !== id) : [...imageSetIds, id]);
   };
 
-  // board sizing (full-screen in-game view, matching the design's GameBoard)
-  const board = dimension <= 4 ? 460 : dimension <= 6 ? 620 : 760;
-  const gap = dimension <= 4 ? 12 : dimension <= 6 ? 9 : 6;
-  const glyphFont =
-    dimension <= 4 ? "clamp(26px, 7vmin, 46px)" : dimension <= 6 ? "clamp(17px, 4.6vmin, 32px)" : "clamp(11px, 3.2vmin, 24px)";
-  const tileR = Math.max(6, Math.min(R, dimension > 6 ? 9 : 14));
+  // Responsive tile sizing (full-screen in-game view) — tiles grow to fill the
+  // space, clamped between a min and max size.
+  const { gap, tile, font: glyphFont, radius: tileR } = boardMetrics(dimension);
 
   const slots: (string | null)[] = [];
   for (let i = 0; i < MAX_PLAYERS; i++) slots.push(order[i] || null);
@@ -369,8 +366,8 @@ export default function LobbyPage() {
 
         {/* board */}
         <div style={{ flex: "1 1 auto", display: "flex", alignItems: "center", justifyContent: "center", padding: "clamp(10px,2vw,24px)", minHeight: 0 }}>
-          <div style={{ position: "relative", width: `min(92vw, 86vh, ${board}px)` }}>
-            <div style={{ display: "grid", gridTemplateColumns: `repeat(${dimension}, 1fr)`, gap, fontSize: glyphFont }}>
+          <div style={{ position: "relative", width: "fit-content", maxWidth: "100%" }}>
+            <div style={{ display: "grid", gridTemplateColumns: `repeat(${dimension}, ${tile})`, gap, fontSize: glyphFont }}>
               {(game.tiles || []).map((emoji, i) => {
                 const ownerUid = game.matchedBy?.[i];
                 const isPaired = ownerUid !== undefined;
